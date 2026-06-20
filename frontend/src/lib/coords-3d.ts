@@ -1,4 +1,4 @@
-import type { ViewType, Keypoint3D } from "@/types";
+import type { ViewType, Keypoint3D, CameraPose } from "@/types";
 
 // ── ビューごとの軸マッピング ───────────────────────────────────
 // px_axis: 画像の横方向(pixel_x増加) → 3D座標のどの軸(正方向)
@@ -55,6 +55,61 @@ export function pixelToWorld(
     [map.px_axis]: parseFloat(relX.toFixed(3)),
     [map.py_axis]: parseFloat(relY.toFixed(3)),
   };
+}
+
+// ── ホモグラフィ変換（9要素 row-major H、pixel → mat cm 座標） ─
+export function applyHomography(H: number[], px: number, py: number): { x: number; y: number } {
+  const w = H[6] * px + H[7] * py + H[8];
+  return { x: (H[0] * px + H[1] * py + H[2]) / w, y: (H[3] * px + H[4] * py + H[5]) / w };
+}
+
+// ── ホモグラフィ使用版 pixelToWorld（遠近歪み補正あり） ──────
+export function pixelToWorldH(
+  px: number,
+  py: number,
+  H: number[],
+  viewType: ViewType,
+  matWidthCm: number,
+  matHeightCm: number,
+  mapOverride?: AxisMap,
+): Partial<Record<"x_cm" | "y_cm" | "z_cm", number>> {
+  const map = mapOverride ?? VIEW_AXIS_MAP[viewType];
+  const { x: matX, y: matY } = applyHomography(H, px, py);
+  let relX = matX - matWidthCm / 2;
+  let relY = matY - matHeightCm / 2;
+  if (map.px_inverted) relX = -relX;
+  if (map.py_inverted) relY = -relY;
+  return {
+    [map.px_axis]: parseFloat(relX.toFixed(3)),
+    [map.py_axis]: parseFloat(relY.toFixed(3)),
+  };
+}
+
+// ── カメラ姿勢からの光線逆投影 ────────────────────────────────
+// px, py: 元画像ピクセル座標 → ワールド空間の光線方向ベクトル
+export function unprojectRay(
+  px: number, py: number, pose: CameraPose,
+): [number, number, number] {
+  const M = pose.RT_Kinv;
+  return [
+    M[0]*px + M[1]*py + M[2],
+    M[3]*px + M[4]*py + M[5],
+    M[6]*px + M[7]*py + M[8],
+  ];
+}
+
+// 光線と Z=targetZ 平面の交点（ワールド座標 x, y を返す）
+export function intersectPlaneZ(
+  px: number, py: number,
+  pose: CameraPose,
+  targetZ: number,
+): { x: number; y: number } | null {
+  const [C0, C1, C2] = pose.C;
+  const [d0, d1, d2] = unprojectRay(px, py, pose);
+  if (Math.abs(d2) < 1e-8) return null;
+  const t = (targetZ - C2) / d2;
+  if (t < 0) return null;
+  return { x: C0 + t * d0, y: C1 + t * d1 };
 }
 
 // ── 既存 3D 点に新たな軸を上書きマージ ──────────────────────

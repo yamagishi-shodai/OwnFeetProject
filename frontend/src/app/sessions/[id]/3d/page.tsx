@@ -30,9 +30,11 @@ export default function ThreeDPage() {
   const {
     views, keypoints, clicks, activeView,
     selectedLabel, matWidthCm, matHeightCm, viewCorners, loading, saving, error, savedFlash,
-    addView, calibrateView, resetScale, placeClick, deleteKeypoint,
+    addView, calibrateView, resetScale, placeClick, deleteKeypoint, refineKeypointXY,
     setActiveView, setLabel,
   } = use3DSession(id);
+
+  const topViewHasPose = views.some(v => v.view_type === "top" && v.camera_pose);
 
   // ビューが変わったらキャリブ点をリセット
   useEffect(() => {
@@ -305,11 +307,18 @@ export default function ThreeDPage() {
 
             {!isCalibMode && (
               <section>
+                {topViewHasPose && (
+                  <p className="text-[10px] text-accent-blue mb-1.5 px-0.5">
+                    姿勢推定済み — 3軸確定済みのポイントに「XY補正」が使えます
+                  </p>
+                )}
                 <Keypoint3DList
                   keypoints={keypoints}
                   selectedLabel={selectedLabel}
                   onSelectLabel={setLabel}
                   onDelete={deleteKeypoint}
+                  onRefineXY={refineKeypointXY}
+                  canRefineXY={topViewHasPose}
                 />
               </section>
             )}

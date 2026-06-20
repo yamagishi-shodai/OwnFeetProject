@@ -17,6 +17,11 @@ export type Point = {
   y: number;
 };
 
+export type CameraPose = {
+  C: [number, number, number];
+  RT_Kinv: number[];
+};
+
 export type MeasurementSession = {
   id: string;
   dog_id: string;
@@ -25,6 +30,7 @@ export type MeasurementSession = {
   mat_grid_cm: number;
   mat_width_cm: number;
   mat_height_cm: number;
+  marker_size_cm: number;
   notes: string | null;
   created_at: string;
 };
@@ -79,6 +85,8 @@ export type SessionView = {
   view_type: ViewType;
   image_url: string | null;
   pixels_per_cm: number | null;
+  homography_matrix: number[] | null;
+  camera_pose: CameraPose | null;
   created_at: string;
 };
 

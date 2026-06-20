@@ -16,6 +16,7 @@ function NewSessionForm() {
   const [dogId, setDogId] = useState(defaultDogId);
   const [matWidthCm, setMatWidthCm] = useState(84);
   const [matHeightCm, setMatHeightCm] = useState(119);
+  const [markerSizeCm, setMarkerSizeCm] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,6 +34,7 @@ function NewSessionForm() {
         mat_grid_cm: matWidthCm,
         mat_width_cm: matWidthCm,
         mat_height_cm: matHeightCm,
+        marker_size_cm: markerSizeCm,
         image_url: null, pixels_per_cm: null, notes: null,
       })
       .select()
@@ -111,6 +113,25 @@ function NewSessionForm() {
                   <span className="text-xs text-ink-muted">cm</span>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* マーカーサイズ（両面同時補正用・省略可） */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-bold text-ink-muted">
+              マーカー1辺の実寸
+              <span className="ml-1 font-normal text-ink-muted">（L字配置で両面補正を使う場合のみ）</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={markerSizeCm || ""}
+                onChange={e => setMarkerSizeCm(parseFloat(e.target.value) || 0)}
+                min="0" step="0.5" placeholder="0"
+                className="w-20 h-9 px-2 rounded-xl border border-border-default text-sm text-center font-bold
+                  focus:outline-none focus:ring-2 focus:ring-accent-green/40"
+              />
+              <span className="text-xs text-ink-muted">cm（0 = 中心点のみ使用）</span>
             </div>
           </div>
 

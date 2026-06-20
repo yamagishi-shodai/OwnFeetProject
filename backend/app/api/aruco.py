@@ -93,6 +93,7 @@ async def detect_aruco(
     mat_width_cm: float = Form(...),
     mat_height_cm: float = Form(...),
     dictionary: str = Form("DICT_4X4_50"),
+    marker_size_cm: float = Form(0.0),
 ):
     if mat_width_cm <= 0 or mat_height_cm <= 0:
         raise HTTPException(status_code=422, detail="mat_width_cm and mat_height_cm must be positive")
@@ -138,9 +139,13 @@ async def detect_aruco(
             detail=f"ArUco markers not found (image size: {img.shape[1]}x{img.shape[0]})"
         )
 
-    # 検出されたマーカーを {id: center_px} に変換
+    # 検出されたマーカーを {id: center_px} および {id: corners(4,2)} に変換
     detected: dict[int, np.ndarray] = {
         int(ids[i][0]): _marker_center(corners[i])
+        for i in range(len(ids))
+    }
+    detected_corners: dict[int, np.ndarray] = {
+        int(ids[i][0]): corners[i].reshape(4, 2)
         for i in range(len(ids))
     }
 
@@ -175,6 +180,81 @@ async def detect_aruco(
     pixels_per_cm = float(np.mean(estimates))
     h, w = img.shape[:2]
 
+    # 4コーナーすべて揃っている場合はホモグラフィ行列を計算
+    homography_matrix = None
+    if all(cid in markers for cid in [TL, TR, BL, BR]):
+        src_pts = np.float32([markers[TL], markers[TR], markers[BL], markers[BR]])
+        dst_pts = np.float32([
+            [0, 0],
+            [mat_width_cm, 0],
+            [0, mat_height_cm],
+            [mat_width_cm, mat_height_cm],
+        ])
+        try:
+            H = cv2.getPerspectiveTransform(src_pts, dst_pts)
+            homography_matrix = H.flatten().tolist()
+        except Exception:
+            homography_matrix = None
+
+    # 床マット＋壁マット両方が揃っている場合は solvePnP でカメラ姿勢を推定
+    # マーカー中心の3D位置（原点=床-壁物理接合コーナー、M=5cm余白）
+    M = 5.0
+    W, H_mat = mat_width_cm, mat_height_cm
+    CENTER_3D: dict[int, list[float]] = {
+        0: [M,     M,     0.0],
+        1: [M+W,   M,     0.0],
+        2: [M,     M+H_mat, 0.0],
+        3: [M+W,   M+H_mat, 0.0],
+        4: [M,     0.0,   M+H_mat],
+        5: [M+W,   0.0,   M+H_mat],
+        6: [M,     0.0,   M],
+        7: [M+W,   0.0,   M],
+    }
+    camera_pose = None
+    floor_present = any(mid in detected for mid in FLOOR_IDS)
+    wall_present  = any(mid in detected for mid in WALL_IDS)
+    if floor_present and wall_present:
+        obj_pts: list[list[float]] = []
+        img_pts: list[list[float]] = []
+        if marker_size_cm > 0:
+            S = marker_size_cm / 2.0
+            FLOOR_OFFSETS = [(-S, -S, 0.0), (+S, -S, 0.0), (+S, +S, 0.0), (-S, +S, 0.0)]
+            WALL_OFFSETS  = [(-S, 0.0, +S), (+S, 0.0, +S), (+S, 0.0, -S), (-S, 0.0, -S)]
+            for mid, c3d in CENTER_3D.items():
+                if mid not in detected_corners:
+                    continue
+                offsets = FLOOR_OFFSETS if mid < 4 else WALL_OFFSETS
+                for j, (ox, oy, oz) in enumerate(offsets):
+                    obj_pts.append([c3d[0]+ox, c3d[1]+oy, c3d[2]+oz])
+                    img_pts.append(detected_corners[mid][j].tolist())
+        else:
+            for mid, c3d in CENTER_3D.items():
+                if mid in detected:
+                    obj_pts.append(c3d)
+                    img_pts.append(detected[mid].tolist())
+        if len(obj_pts) >= 6:
+            f_est = float(max(w, h))
+            K_est = np.array([
+                [f_est, 0.0,   w / 2.0],
+                [0.0,   f_est, h / 2.0],
+                [0.0,   0.0,   1.0],
+            ], dtype=np.float64)
+            try:
+                ok, rvec, tvec = cv2.solvePnP(
+                    np.float32(obj_pts), np.float32(img_pts),
+                    K_est, None, flags=cv2.SOLVEPNP_ITERATIVE,
+                )
+                if ok:
+                    R, _ = cv2.Rodrigues(rvec)
+                    C_world = (-R.T @ tvec).flatten()
+                    RT_Kinv = (R.T @ np.linalg.inv(K_est)).flatten()
+                    camera_pose = {
+                        "C":       C_world.tolist(),
+                        "RT_Kinv": RT_Kinv.tolist(),
+                    }
+            except Exception:
+                camera_pose = None
+
     return {
         "pixels_per_cm": round(pixels_per_cm, 4),
         "markers_found": len(markers),
@@ -183,4 +263,6 @@ async def detect_aruco(
             {"id": mid, "x": round(float(center[0] / w), 4), "y": round(float(center[1] / h), 4)}
             for mid, center in markers.items()
         ],
+        "homography_matrix": homography_matrix,
+        "camera_pose": camera_pose,
     }

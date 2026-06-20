@@ -29,7 +29,7 @@ export default function ThreeDPage() {
 
   const {
     views, keypoints, clicks, activeView,
-    selectedLabel, matGridCm, loading, saving, error, savedFlash,
+    selectedLabel, matWidthCm, matHeightCm, viewCorners, loading, saving, error, savedFlash,
     addView, calibrateView, resetScale, placeClick, deleteKeypoint,
     setActiveView, setLabel,
   } = use3DSession(id);
@@ -40,10 +40,10 @@ export default function ThreeDPage() {
     setKnownCm(null);
   }, [activeView?.id]);
 
-  // matGridCm がロードされたら knownCm に初期値を入れる
+  // matWidthCm がロードされたら knownCm に初期値を入れる
   useEffect(() => {
-    if (matGridCm && knownCm === null) setKnownCm(matGridCm);
-  }, [matGridCm, knownCm]);
+    if (matWidthCm && knownCm === null) setKnownCm(matWidthCm);
+  }, [matWidthCm, knownCm]);
 
   if (loading) return <p className="p-8 text-sm text-ink-muted">読み込み中…</p>;
 
@@ -212,6 +212,7 @@ export default function ThreeDPage() {
                   selectedLabel={selectedLabel}
                   calibPoints={calibPoints}
                   onViewClick={handleCanvasClick}
+                  detectedCorners={viewCorners[activeView.id]}
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-sm text-ink-muted">
@@ -275,19 +276,30 @@ export default function ThreeDPage() {
 
           {/* 右パネル */}
           <div className="flex flex-col gap-4 overflow-y-auto max-h-[640px] pr-1">
+
+            {/* マット印刷 */}
+            <section>
+              <p className="text-xs font-bold text-ink-muted mb-2">採寸マット</p>
+              <MatPdfButton widthCm={matWidthCm} heightCm={matHeightCm} />
+            </section>
+
             <section>
               <p className="text-xs font-bold text-ink-muted mb-2">ビュー管理</p>
               <div className="flex flex-col gap-2">
-                {VIEW_ORDER.map(vt => (
-                  <ViewUploader
-                    key={vt}
-                    viewType={vt}
-                    existingView={views.find(v => v.view_type === vt)}
-                    onUpload={addView}
-                    onResetScale={resetScale}
-                    saving={saving}
-                  />
-                ))}
+                {VIEW_ORDER.map(vt => {
+                  const v = views.find(v => v.view_type === vt);
+                  return (
+                    <ViewUploader
+                      key={vt}
+                      viewType={vt}
+                      existingView={v}
+                      onUpload={addView}
+                      onResetScale={resetScale}
+                      saving={saving}
+                      detectedCorners={v ? viewCorners[v.id] : undefined}
+                    />
+                  );
+                })}
               </div>
             </section>
 
@@ -308,7 +320,42 @@ export default function ThreeDPage() {
   );
 }
 
-// ── 3Dビュー + 写真パネル ──────────────────────────────────────
+// ── マットPDFダウンロードボタン ───────────────────────────────
+function MatPdfButton({ widthCm, heightCm }: { widthCm: number; heightCm: number }) {
+  const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
+  if (!backend) {
+    return (
+      <p className="text-xs text-ink-muted">
+        バックエンド未設定（NEXT_PUBLIC_BACKEND_URL）
+      </p>
+    );
+  }
+  const url = `${backend}/api/v1/mat-pdf`;
+  return (
+    <div className="flex flex-col gap-2 p-3 rounded-2xl bg-warm-card border border-border-default">
+      <p className="text-xs text-ink-muted">
+        マットサイズ:{" "}
+        <span className="font-bold text-ink-primary">{widthCm} cm</span>
+        {" × "}
+        <span className="font-bold text-ink-primary">{heightCm} cm</span>
+      </p>
+      <p className="text-[10px] text-ink-muted leading-relaxed">
+        1ページ目: 床マット（ID 0–3）<br />
+        2ページ目: 壁マット（ID 4–7）<br />
+        四隅に切り取って貼り付けてください
+      </p>
+      <a
+        href={url}
+        download
+        className="block w-full text-center px-3 py-2 rounded-xl bg-accent-blue text-white text-xs font-bold hover:opacity-90 transition-opacity"
+      >
+        マーカーPDF をダウンロード
+      </a>
+    </div>
+  );
+}
+
+// ── 3Dビュー + 写真パネル ───────────────────────────────────────
 function View3DPanel({
   keypoints, selectedLabel, views, onSelectLabel, onDelete,
 }: {

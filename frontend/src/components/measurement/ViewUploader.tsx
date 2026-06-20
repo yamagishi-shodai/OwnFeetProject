@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import type { SessionView, ViewType } from "@/types";
 import { VIEW_LABELS } from "@/types";
+import type { NormalizedCorner } from "@/lib/aruco-api";
 
 type Props = {
   viewType: ViewType;
@@ -10,9 +11,10 @@ type Props = {
   onUpload: (viewType: ViewType, file: File) => Promise<void>;
   onResetScale?: (viewId: string) => Promise<void>;
   saving: boolean;
+  detectedCorners?: NormalizedCorner[];
 };
 
-export function ViewUploader({ viewType, existingView, onUpload, onResetScale, saving }: Props) {
+export function ViewUploader({ viewType, existingView, onUpload, onResetScale, saving, detectedCorners }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {

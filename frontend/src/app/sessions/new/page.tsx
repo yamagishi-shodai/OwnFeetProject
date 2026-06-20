@@ -14,7 +14,8 @@ function NewSessionForm() {
 
   const { dogs, loading: dogsLoading } = useDogs();
   const [dogId, setDogId] = useState(defaultDogId);
-  const [matGridCm, setMatGridCm] = useState(10);
+  const [matWidthCm, setMatWidthCm] = useState(84);
+  const [matHeightCm, setMatHeightCm] = useState(119);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,12 +28,18 @@ function NewSessionForm() {
 
     const { data: session, error: sessionErr } = await supabase
       .from("measurement_sessions")
-      .insert({ dog_id: dogId, mat_grid_cm: matGridCm, image_url: null, pixels_per_cm: null, notes: null })
+      .insert({
+        dog_id: dogId,
+        mat_grid_cm: matWidthCm,
+        mat_width_cm: matWidthCm,
+        mat_height_cm: matHeightCm,
+        image_url: null, pixels_per_cm: null, notes: null,
+      })
       .select()
       .single();
 
     if (sessionErr || !session) {
-      setError("セッション作成に失敗しました");
+      setError(sessionErr?.message ?? "セッション作成に失敗しました");
       setSaving(false);
       return;
     }
@@ -68,24 +75,42 @@ function NewSessionForm() {
             </select>
           </div>
 
-          {/* ARマット グリッド間隔 */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-bold text-ink-muted">ARマット グリッド間隔</label>
-            <p className="text-xs text-ink-muted">スケール設定に使う既知の距離です</p>
-            <div className="flex gap-3">
-              {[5, 10].map((v) => (
-                <label key={v} className="flex items-center gap-2 text-sm cursor-pointer">
+          {/* マット寸法 */}
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-bold text-ink-muted">採寸マットのサイズ</label>
+            <p className="text-xs text-ink-muted">
+              四隅マーカーの<span className="font-bold">中心から中心</span>までの距離を入力してください
+            </p>
+            <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-ink-muted">横（幅）</span>
+                <div className="flex items-center gap-1">
                   <input
-                    type="radio"
-                    name="mat_grid"
-                    value={v}
-                    checked={matGridCm === v}
-                    onChange={() => setMatGridCm(v)}
-                    className="accent-accent-green"
+                    type="number"
+                    value={matWidthCm}
+                    onChange={e => setMatWidthCm(parseFloat(e.target.value) || 0)}
+                    min="1" step="1"
+                    className="w-20 h-9 px-2 rounded-xl border border-border-default text-sm text-center font-bold
+                      focus:outline-none focus:ring-2 focus:ring-accent-green/40"
                   />
-                  {v} cm
-                </label>
-              ))}
+                  <span className="text-xs text-ink-muted">cm</span>
+                </div>
+              </div>
+              <span className="text-ink-muted mt-4">×</span>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-ink-muted">縦（高さ）</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    value={matHeightCm}
+                    onChange={e => setMatHeightCm(parseFloat(e.target.value) || 0)}
+                    min="1" step="1"
+                    className="w-20 h-9 px-2 rounded-xl border border-border-default text-sm text-center font-bold
+                      focus:outline-none focus:ring-2 focus:ring-accent-green/40"
+                  />
+                  <span className="text-xs text-ink-muted">cm</span>
+                </div>
+              </div>
             </div>
           </div>
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useReducer, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pixelToWorld, merge3DPoint, VIEW_AXIS_MAP } from "@/lib/coords-3d";
+import { detectAruco, type NormalizedCorner } from "@/lib/aruco-api";
 import type {
   SessionView, SessionViewInsert, Keypoint3D, Keypoint3DInsert,
   ViewClick, ViewType,
@@ -16,7 +17,9 @@ type State = {
   clicks: ViewClick[];
   activeViewId: string | null;
   selectedLabel: string;
-  matGridCm: number;
+  matWidthCm: number;
+  matHeightCm: number;
+  viewCorners: Record<string, NormalizedCorner[]>;
   loading: boolean;
   saving: boolean;
   error: string | null;
@@ -26,14 +29,16 @@ const INITIAL: State = {
   views: [], keypoints: [], clicks: [],
   activeViewId: null,
   selectedLabel: "右肩",
-  matGridCm: 10,
+  matWidthCm: 0,
+  matHeightCm: 0,
+  viewCorners: {},
   loading: true, saving: false, error: null,
 };
 
 // ── Actions ────────────────────────────────────────────────────
 
 type Action =
-  | { type: "LOADED"; views: SessionView[]; keypoints: Keypoint3D[]; clicks: ViewClick[]; matGridCm: number }
+  | { type: "LOADED"; views: SessionView[]; keypoints: Keypoint3D[]; clicks: ViewClick[]; matWidthCm: number; matHeightCm: number }
   | { type: "SET_ACTIVE_VIEW"; viewId: string }
   | { type: "SET_LABEL"; label: string }
   | { type: "VIEW_ADDED"; view: SessionView }
@@ -42,6 +47,7 @@ type Action =
   | { type: "CLICK_ADDED"; click: ViewClick }
   | { type: "CLICK_UPDATED"; click: ViewClick }
   | { type: "KEYPOINT_DELETED"; id: string }
+  | { type: "VIEW_CORNERS"; viewId: string; corners: NormalizedCorner[] }
   | { type: "SAVING" }
   | { type: "DONE" }
   | { type: "ERROR"; message: string };
@@ -50,7 +56,8 @@ function reducer(s: State, a: Action): State {
   switch (a.type) {
     case "LOADED":
       return { ...s, views: a.views, keypoints: a.keypoints, clicks: a.clicks,
-               matGridCm: a.matGridCm, activeViewId: a.views[0]?.id ?? null, loading: false };
+               matWidthCm: a.matWidthCm, matHeightCm: a.matHeightCm,
+               activeViewId: a.views[0]?.id ?? null, loading: false };
     case "SET_ACTIVE_VIEW": return { ...s, activeViewId: a.viewId };
     case "SET_LABEL":       return { ...s, selectedLabel: a.label };
     case "VIEW_ADDED":
@@ -71,6 +78,8 @@ function reducer(s: State, a: Action): State {
     case "KEYPOINT_DELETED":
       return { ...s, keypoints: s.keypoints.filter(k => k.id !== a.id),
                clicks: s.clicks.filter(c => c.keypoint_3d_id !== a.id) };
+    case "VIEW_CORNERS":
+      return { ...s, viewCorners: { ...s.viewCorners, [a.viewId]: a.corners } };
     case "SAVING": return { ...s, saving: true, error: null };
     case "DONE":   return { ...s, saving: false };
     case "ERROR":  return { ...s, saving: false, error: a.message };
@@ -87,7 +96,7 @@ export function use3DSession(sessionId: string) {
   useEffect(() => {
     async function load() {
       const [{ data: session }, { data: views }, { data: keypoints }, { data: clicks }] = await Promise.all([
-        supabase.from("measurement_sessions").select("mat_grid_cm").eq("id", sessionId).single(),
+        supabase.from("measurement_sessions").select("mat_width_cm, mat_height_cm").eq("id", sessionId).single(),
         supabase.from("session_views").select("*").eq("session_id", sessionId).order("created_at"),
         supabase.from("keypoints_3d").select("*").eq("session_id", sessionId).order("created_at"),
         supabase.from("view_clicks").select("*, keypoints_3d!inner(session_id)").eq("keypoints_3d.session_id", sessionId),
@@ -97,7 +106,8 @@ export function use3DSession(sessionId: string) {
         views: views ?? [],
         keypoints: keypoints ?? [],
         clicks: clicks ?? [],
-        matGridCm: session?.mat_grid_cm ?? 10,
+        matWidthCm: session?.mat_width_cm ?? 0,
+        matHeightCm: session?.mat_height_cm ?? 0,
       });
     }
     load();
@@ -127,8 +137,19 @@ export function use3DSession(sessionId: string) {
     const { data: updated } = await supabase
       .from("session_views").update({ image_url: urlData.publicUrl }).eq("id", viewRecord.id).select().single();
 
-    dispatch({ type: "VIEW_ADDED", view: updated ?? { ...viewRecord, image_url: urlData.publicUrl } });
-  }, [sessionId]);
+    const result = await detectAruco(file, state.matWidthCm, state.matHeightCm);
+    if (result) {
+      await supabase.from("session_views")
+        .update({ pixels_per_cm: result.pixelsPerCm }).eq("id", viewRecord.id);
+      dispatch({
+        type: "VIEW_ADDED",
+        view: { ...(updated ?? viewRecord), image_url: urlData.publicUrl, pixels_per_cm: result.pixelsPerCm },
+      });
+      dispatch({ type: "VIEW_CORNERS", viewId: viewRecord.id, corners: result.corners });
+    } else {
+      dispatch({ type: "VIEW_ADDED", view: updated ?? { ...viewRecord, image_url: urlData.publicUrl } });
+    }
+  }, [sessionId, state.matWidthCm, state.matHeightCm]);
 
   // ── キャリブレーション ────────────────────────────────────
   const calibrateView = useCallback(async (
@@ -223,6 +244,7 @@ export function use3DSession(sessionId: string) {
     ...state,
     savedFlash,
     addView,
+    viewCorners: state.viewCorners,
     calibrateView,
     resetScale,
     placeClick,

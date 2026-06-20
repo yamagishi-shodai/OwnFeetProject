@@ -23,6 +23,8 @@ export type MeasurementSession = {
   image_url: string | null;
   pixels_per_cm: number | null;
   mat_grid_cm: number;
+  mat_width_cm: number;
+  mat_height_cm: number;
   notes: string | null;
   created_at: string;
 };

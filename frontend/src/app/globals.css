@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── カラーパレット ─────────────────────────── */
+  --color-warm-gutter: #eae4e1;
+  --color-warm-main:   #EAE2D7;
+  --color-warm-sub:    #EFEAE6;
+  --color-warm-bg:     #f7f1f0;
+  --color-warm-card:   #faf7f3;
+
+  --color-accent-green:  #3E6954;
+  --color-accent-red:    #D16340;
+  --color-accent-blue:   #556E97;
+  --color-accent-yellow: #cfaa55;
+
+  --color-ink-primary: #222222;
+  --color-ink-muted:   #8a7a6a;
+  --color-ink-light:   #a89888;
+  --color-ink-dark:    #3e3229;
+
+  --color-border-default: #e0d8cf;
+  --color-border-light:   #d4cdc4;
+
+  /* ── フォント ──────────────────────────────── */
+  --font-sans: var(--font-mplus-rounded), sans-serif;
+}
+
+body {
+  background-color: var(--color-warm-sub);
+  color: var(--color-ink-primary);
+}

@@ -53,7 +53,7 @@ function DogCard({ dog }: { dog: DogWithSessions }) {
             className="w-full h-full object-cover"
           />
         ) : (
-          <span className="text-3xl select-none">🐾</span>
+          <span className="text-3xl select-none text-ink-muted">—</span>
         )}
       </div>
 

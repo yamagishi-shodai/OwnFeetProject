@@ -26,7 +26,7 @@ export default function RootLayout({
         <header className="sticky top-0 z-50 bg-warm-main border-b border-border-light">
           <div className="max-w-5xl mx-auto px-5 py-2.5 flex items-center gap-3">
             <Link href="/" className="text-lg font-bold text-ink-dark tracking-tight">
-              🐾 採寸プラットフォーム
+              採寸プラットフォーム
             </Link>
             <span className="text-xs font-bold text-ink-muted tracking-widest">
               Dog Wheelchair Fitting

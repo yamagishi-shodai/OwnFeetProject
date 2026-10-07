@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef } from "react";
+import { useState } from "react";
 import type { SessionView, ViewType } from "@/types";
 import { VIEW_LABELS } from "@/types";
-import type { NormalizedCorner } from "@/lib/aruco-api";
+import { MediaCapture } from "@/components/capture/MediaCapture";
 
 type Props = {
   viewType: ViewType;
@@ -11,33 +11,37 @@ type Props = {
   onUpload: (viewType: ViewType, file: File) => Promise<void>;
   onResetScale?: (viewId: string) => Promise<void>;
   saving: boolean;
-  detectedCorners?: NormalizedCorner[];
 };
 
-export function ViewUploader({ viewType, existingView, onUpload, onResetScale, saving, detectedCorners }: Props) {
-  const fileRef = useRef<HTMLInputElement>(null);
+export function ViewUploader({ viewType, existingView, onUpload, onResetScale, saving }: Props) {
+  const [capturing, setCapturing] = useState(false);
+  const label = VIEW_LABELS[viewType];
 
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  async function handleCapture(file: File) {
+    setCapturing(false);
     await onUpload(viewType, file);
-    e.target.value = "";
   }
 
-  const label = VIEW_LABELS[viewType];
+  if (capturing) {
+    return (
+      <div className="flex flex-col gap-2 p-3 rounded-2xl bg-warm-card border border-border-default">
+        <p className="text-xs font-bold text-ink-muted">{label}</p>
+        <MediaCapture onCapture={handleCapture} onCancel={() => setCapturing(false)} />
+      </div>
+    );
+  }
 
   if (!existingView) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-5 border-2 border-dashed border-border-default rounded-2xl bg-warm-card">
         <p className="text-xs text-ink-muted font-bold">{label}</p>
         <button
-          onClick={() => fileRef.current?.click()}
+          onClick={() => setCapturing(true)}
           disabled={saving}
           className="px-4 py-2 rounded-xl bg-accent-blue text-white text-xs font-bold disabled:opacity-50"
         >
           {saving ? "アップロード中…" : "画像を選択"}
         </button>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
       </div>
     );
   }
@@ -47,13 +51,12 @@ export function ViewUploader({ viewType, existingView, onUpload, onResetScale, s
       <div className="flex items-center justify-between">
         <p className="text-xs font-bold text-ink-muted">{label}</p>
         <button
-          onClick={() => fileRef.current?.click()}
+          onClick={() => setCapturing(true)}
           disabled={saving}
           className="text-xs text-accent-blue hover:underline disabled:opacity-50"
         >
           再アップロード
         </button>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
       </div>
 
       {existingView.image_url && (

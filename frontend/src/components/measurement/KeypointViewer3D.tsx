@@ -121,18 +121,7 @@ function SkeletonEdges({ keypoints }: { keypoints: Keypoint3D[] }) {
 }
 
 // ── メインシーン ──────────────────────────────────────────────
-function Scene({ keypoints, selectedLabel }: { keypoints: Keypoint3D[]; selectedLabel: string }) {
-  const complete = keypoints.filter(k => keypointStatus(k).complete);
-
-  // 重心を Three.js 座標で計算（床面 Y=0 固定）
-  const center: [number, number, number] = complete.length > 0
-    ? [
-        complete.reduce((s, k) => s + k.x_cm!, 0) / complete.length,
-        0,
-        complete.reduce((s, k) => s + k.y_cm!, 0) / complete.length, // Three.js Z = Y_db
-      ]
-    : [0, 0, 0];
-
+function Scene({ keypoints, selectedLabel, center }: { keypoints: Keypoint3D[]; selectedLabel: string; center: [number, number, number] }) {
   return (
     <>
       <ambientLight intensity={1.2} />
@@ -172,19 +161,31 @@ type Props = {
 };
 
 export function KeypointViewer3D({ keypoints, selectedLabel, className = "", style }: Props) {
+  // 重心を Three.js 座標で計算（床面 Y=0 固定）。カメラはこの重心からの相対位置に置く
+  // ——固定のワールド座標にすると、データの重心が原点から離れている場合に
+  // 視点が被写体からズレて水平に近いグレージング角度になり、3Dビューが横倒しに見えてしまう
+  const complete = keypoints.filter(k => keypointStatus(k).complete);
+  const center: [number, number, number] = complete.length > 0
+    ? [
+        complete.reduce((s, k) => s + k.x_cm!, 0) / complete.length,
+        0,
+        complete.reduce((s, k) => s + k.y_cm!, 0) / complete.length, // Three.js Z = Y_db
+      ]
+    : [0, 0, 0];
+
   return (
     <div
       className={`relative rounded-2xl overflow-hidden bg-warm-gutter ${className}`}
       style={style}
     >
       <Canvas
-        camera={{ position: [40, 30, 50], fov: 50, near: 0.1, far: 2000 }}
+        camera={{ position: [center[0] + 40, center[1] + 30, center[2] + 50], fov: 50, near: 0.1, far: 2000 }}
         gl={{ antialias: true, toneMapping: THREE.NoToneMapping }}
         onCreated={({ gl }) => {
           gl.setClearColor("#eae4e1");
         }}
       >
-        <Scene keypoints={keypoints} selectedLabel={selectedLabel} />
+        <Scene keypoints={keypoints} selectedLabel={selectedLabel} center={center} />
       </Canvas>
 
       {/* 凡例 */}

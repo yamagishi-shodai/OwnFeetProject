@@ -2,29 +2,32 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import dynamic from "next/dynamic";
+import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Card } from "@/components/ui/Card";
 import { linkButtonClass } from "@/components/ui/Button";
-import type { Dog, Measurement, MeasurementSession } from "@/types";
+import { keypointStatus } from "@/lib/coords-3d";
+import type { Dog, Keypoint3D, MeasurementSession, SessionView } from "@/types";
 
-type SessionWithMeasurements = MeasurementSession & {
-  measurements: Measurement[];
-};
+const KeypointViewer3D = dynamic(
+  () => import("@/components/measurement/KeypointViewer3D").then(m => ({ default: m.KeypointViewer3D })),
+  { ssr: false, loading: () => <div className="w-full h-full flex items-center justify-center text-sm text-ink-muted">3Dビューを読み込み中…</div> }
+);
 
-// ラベルごとに最新値をまとめた型
-type LatestByLabel = {
-  label: string;
-  value_cm: number;
-  session_date: string;
-  session_id: string;
+type SessionWithDetails = MeasurementSession & {
+  session_views: Pick<SessionView, "view_type" | "image_url">[];
+  keypoints_3d: Keypoint3D[];
 };
 
 export default function DogDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [dog, setDog] = useState<Dog | null>(null);
-  const [sessions, setSessions] = useState<SessionWithMeasurements[]>([]);
+  const [sessions, setSessions] = useState<SessionWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -32,7 +35,7 @@ export default function DogDetailPage() {
         supabase.from("dogs").select("*").eq("id", id).single(),
         supabase
           .from("measurement_sessions")
-          .select("*, measurements(*)")
+          .select("*, session_views(view_type, image_url), keypoints_3d(*)")
           .eq("dog_id", id)
           .order("created_at", { ascending: false }),
       ]);
@@ -46,25 +49,42 @@ export default function DogDetailPage() {
   if (loading) return <p className="p-8 text-sm text-ink-muted">読み込み中…</p>;
   if (!dog) return <p className="p-8 text-sm text-accent-red">犬が見つかりません</p>;
 
-  // ラベルごとの最新値を集計（セッションは新しい順に並んでいるので先勝ち）
-  const latestByLabel = new Map<string, LatestByLabel>();
-  for (const session of sessions) {
-    for (const m of session.measurements ?? []) {
-      if (!latestByLabel.has(m.label)) {
-        latestByLabel.set(m.label, {
-          label: m.label,
-          value_cm: m.value_cm,
-          session_date: session.created_at,
-          session_id: session.id,
-        });
-      }
-    }
+  // セッションは新しい順に並んでいるので先頭が最新
+  const latestSession = sessions[0] ?? null;
+  const latestSideImage = latestSession?.session_views.find(v => v.view_type === "side_right")?.image_url
+    ?? latestSession?.session_views[0]?.image_url
+    ?? null;
+  const latestKeypoints = latestSession?.keypoints_3d ?? [];
+
+  async function handleDeleteDog() {
+    const ok = window.confirm(
+      `「${dog!.name}」を削除しますか？\n採寸セッション ${sessions.length} 件もすべて削除され、元に戻せません。`
+    );
+    if (!ok) return;
+    setDeleting(true);
+    setDeleteError(null);
+
+    const { error: sessionsErr } = await supabase.from("measurement_sessions").delete().eq("dog_id", id);
+    if (sessionsErr) { setDeleteError(sessionsErr.message); setDeleting(false); return; }
+
+    const { error: dogErr } = await supabase.from("dogs").delete().eq("id", id);
+    if (dogErr) { setDeleteError(dogErr.message); setDeleting(false); return; }
+
+    router.push("/dogs");
   }
-  const latestMeasurements = Array.from(latestByLabel.values());
-  const totalMeasurements = sessions.reduce((n, s) => n + (s.measurements?.length ?? 0), 0);
+
+  async function handleDeleteSession(sessionId: string) {
+    const ok = window.confirm("この採寸セッションを削除しますか？元に戻せません。");
+    if (!ok) return;
+
+    const { error: deleteErr } = await supabase.from("measurement_sessions").delete().eq("id", sessionId);
+    if (deleteErr) { setDeleteError(deleteErr.message); return; }
+
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+  }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 flex flex-col gap-6">
+    <div className="max-w-5xl mx-auto px-4 py-6 flex flex-col gap-6">
 
       {/* ── ヘッダー ────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
@@ -77,59 +97,70 @@ export default function DogDetailPage() {
           </p>
           {dog.notes && <p className="text-xs text-ink-light mt-1">{dog.notes}</p>}
         </div>
-        <Link href={`/sessions/new?dog_id=${dog.id}`} className={linkButtonClass("primary", "sm")}>
-          ＋ 新しい採寸
-        </Link>
+        <div className="flex items-center gap-3 shrink-0">
+          <Link href={`/sessions/new?dog_id=${dog.id}`} className={linkButtonClass("primary", "sm")}>
+            ＋ 新しい採寸
+          </Link>
+          <button
+            type="button"
+            onClick={handleDeleteDog}
+            disabled={deleting}
+            className="text-xs text-accent-red hover:underline disabled:opacity-50"
+          >
+            {deleting ? "削除中…" : "犬を削除"}
+          </button>
+        </div>
       </div>
 
-      {/* ── 各種寸法一覧 ─────────────────────────────── */}
+      {deleteError && <p className="text-sm text-accent-red">削除に失敗しました: {deleteError}</p>}
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+      {/* ── 最新の採寸（横からの画像 + 3Dビュー） ─────────── */}
       <section className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-bold text-ink-dark">各種寸法</h2>
-          <span className="text-xs text-ink-light">
-            累計 {totalMeasurements} 回採寸 · {sessions.length} セッション
-          </span>
+          <h2 className="text-sm font-bold text-ink-dark">最新の採寸</h2>
+          <span className="text-xs text-ink-light">{sessions.length} セッション</span>
         </div>
 
-        {latestMeasurements.length === 0 ? (
+        {!latestSession ? (
           <Card className="text-center py-8 text-sm text-ink-muted">
             採寸データがありません
           </Card>
         ) : (
-          <Card className="p-0 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border-default bg-warm-bg">
-                  <th className="text-left px-4 py-2.5 text-xs font-bold text-ink-muted">部位</th>
-                  <th className="text-right px-4 py-2.5 text-xs font-bold text-ink-muted">最新値</th>
-                  <th className="text-right px-4 py-2.5 text-xs font-bold text-ink-muted">採寸日</th>
-                  <th className="px-4 py-2.5"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {latestMeasurements.map((m) => (
-                  <tr key={m.label} className="border-b border-border-light last:border-0 hover:bg-warm-bg/50 transition-colors">
-                    <td className="px-4 py-3 font-bold text-ink-dark">{m.label}</td>
-                    <td className="px-4 py-3 text-right font-bold text-accent-red tabular-nums text-base">
-                      {m.value_cm.toFixed(1)}
-                      <span className="text-xs font-normal text-ink-muted ml-1">cm</span>
-                    </td>
-                    <td className="px-4 py-3 text-right text-xs text-ink-muted tabular-nums">
-                      {new Date(m.session_date).toLocaleDateString("ja-JP")}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Link
-                        href={`/sessions/${m.session_id}/3d`}
-                        className="text-xs text-accent-blue hover:underline"
-                      >
-                        開く
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+          <div className="flex flex-col gap-3">
+            <Card className="p-0 overflow-hidden">
+              {latestSideImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={latestSideImage}
+                  alt="横からの画像"
+                  className="w-full object-contain bg-warm-gutter"
+                  style={{ height: "min(50vh, 420px)" }}
+                />
+              ) : (
+                <div
+                  className="w-full flex items-center justify-center text-sm text-ink-muted bg-warm-gutter"
+                  style={{ height: "min(50vh, 420px)" }}
+                >
+                  横からの画像はまだありません
+                </div>
+              )}
+            </Card>
+
+            <KeypointViewer3D
+              keypoints={latestKeypoints}
+              selectedLabel=""
+              className="w-full"
+              style={{ height: "min(50vh, 420px)" }}
+            />
+
+            <Link
+              href={`/sessions/${latestSession.id}/3d`}
+              className={`${linkButtonClass("secondary", "sm")} self-start`}
+            >
+              3D採寸ページを開く
+            </Link>
+          </div>
         )}
       </section>
 
@@ -154,7 +185,7 @@ export default function DogDetailPage() {
                       })}
                     </p>
                     <p className="text-xs text-ink-muted">
-                      {s.measurements?.length ?? 0} 部位
+                      {s.keypoints_3d.filter(k => keypointStatus(k).complete).length} 部位確定
                       {s.pixels_per_cm ? "" : " · スケール未設定"}
                     </p>
                   </div>
@@ -166,12 +197,20 @@ export default function DogDetailPage() {
                   <Link href={`/sessions/${s.id}/export`} className={linkButtonClass("secondary", "sm")}>
                     JSON
                   </Link>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSession(s.id)}
+                    className="text-xs text-accent-red hover:underline px-1"
+                  >
+                    削除
+                  </button>
                 </div>
               </Card>
             ))}
           </div>
         )}
       </section>
+      </div>
     </div>
   );
 }

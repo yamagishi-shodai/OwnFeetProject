@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { M_PLUS_Rounded_1c } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
+import { Sidebar } from "@/components/layout/Sidebar";
+import { TopBarSearch } from "@/components/layout/TopBarSearch";
 
 const mPlusRounded = M_PLUS_Rounded_1c({
   weight: ["400", "700"],
@@ -24,18 +26,17 @@ export default function RootLayout({
     <html lang="ja" className={`${mPlusRounded.variable} h-full`}>
       <body className="min-h-full flex flex-col bg-warm-sub text-ink-primary">
         <header className="sticky top-0 z-50 bg-warm-main border-b border-border-light">
-          <div className="max-w-5xl mx-auto px-5 py-2.5 flex items-center gap-3">
-            <Link href="/" className="text-lg font-bold text-ink-dark tracking-tight">
+          <div className="px-5 py-2.5 flex items-center gap-5">
+            <Link href="/" className="text-lg font-bold text-ink-dark tracking-tight shrink-0">
               採寸プラットフォーム
             </Link>
-            <span className="text-xs font-bold text-ink-muted tracking-widest">
-              Dog Wheelchair Fitting
-            </span>
+            <TopBarSearch />
           </div>
         </header>
-        <main className="flex-1">
-          {children}
-        </main>
+        <div className="flex-1 flex">
+          <Sidebar />
+          <main className="flex-1 min-w-0">{children}</main>
+        </div>
       </body>
     </html>
   );

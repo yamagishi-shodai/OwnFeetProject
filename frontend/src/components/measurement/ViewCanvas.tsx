@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { Keypoint3D, SessionView, ViewClick } from "@/types";
 import { keypointStatus, VIEW_AXIS_MAP } from "@/lib/coords-3d";
-import type { NormalizedCorner } from "@/lib/aruco-api";
 
 export type CalibPoint = { x: number; y: number }; // 画像ピクセル座標
 
@@ -14,10 +13,9 @@ type Props = {
   selectedLabel: string;
   calibPoints: CalibPoint[];    // キャリブレーション中の仮点 (0〜2個)
   onViewClick: (pixelX: number, pixelY: number, imgW: number, imgH: number) => void;
-  detectedCorners?: NormalizedCorner[];
 };
 
-export function ViewCanvas({ view, keypoints, clicks, selectedLabel, calibPoints, onViewClick, detectedCorners }: Props) {
+export function ViewCanvas({ view, keypoints, clicks, selectedLabel, calibPoints, onViewClick }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef    = useRef<HTMLImageElement | null>(null);
   const scaleRef  = useRef({ scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0, imgW: 1, imgH: 1 });
@@ -58,45 +56,6 @@ export function ViewCanvas({ view, keypoints, clicks, selectedLabel, calibPoints
       ctx.textAlign = "center";
       ctx.fillText("画像を読み込み中…", W / 2, H / 2);
       return;
-    }
-
-    // ── ArUco 検出オーバーレイ ────────────────────────────────
-    if (detectedCorners && detectedCorners.length > 0) {
-      const { imgW, imgH } = scaleRef.current;
-      const pts = detectedCorners.map(c => ({
-        id: c.id,
-        ...pixelToCanvas(c.x * imgW, c.y * imgH),
-      }));
-      const byLocal = Object.fromEntries(pts.map(p => [p.id % 4, p]));
-      // TL=0 → TR=1 → BR=3 → BL=2 の順で四角形
-      const rectPts = [0, 1, 3, 2].map(i => byLocal[i]).filter(Boolean);
-      if (rectPts.length === 4) {
-        ctx.beginPath();
-        ctx.moveTo(rectPts[0].x, rectPts[0].y);
-        rectPts.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
-        ctx.closePath();
-        ctx.fillStyle = "rgba(62,105,84,0.10)";
-        ctx.fill();
-        ctx.strokeStyle = "rgba(62,105,84,0.65)";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([8, 4]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-      for (const pt of pts) {
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 11, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(62,105,84,0.75)";
-        ctx.fill();
-        ctx.strokeStyle = "rgba(255,255,255,0.9)";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.font = "bold 11px sans-serif";
-        ctx.fillStyle = "white";
-        ctx.textAlign = "center";
-        ctx.fillText(String(pt.id), pt.x, pt.y + 4);
-        ctx.textAlign = "left";
-      }
     }
 
     // ── キャリブレーションモード ──────────────────────────────
@@ -183,7 +142,7 @@ export function ViewCanvas({ view, keypoints, clicks, selectedLabel, calibPoints
       ctx.fillText(`「${selectedLabel}」の位置をクリック`, W / 2, H - 16);
       ctx.restore();
     }
-  }, [view, keypoints, clicks, selectedLabel, calibPoints, isCalibMode, detectedCorners]);
+  }, [view, keypoints, clicks, selectedLabel, calibPoints, isCalibMode]);
 
   function pixelToCanvas(px: number, py: number) {
     const { scaleX, scaleY, offsetX, offsetY } = scaleRef.current;

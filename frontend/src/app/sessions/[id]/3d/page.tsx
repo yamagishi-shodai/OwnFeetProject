@@ -8,6 +8,7 @@ import { use3DSession } from "@/hooks/use3DSession";
 import { ViewCanvas, type CalibPoint } from "@/components/measurement/ViewCanvas";
 import { Keypoint3DList, PRESET_LABELS } from "@/components/measurement/Keypoint3DList";
 import { ViewUploader } from "@/components/measurement/ViewUploader";
+import { DogInfoForm } from "@/components/dogs/DogInfoForm";
 import { VIEW_LABELS } from "@/types";
 import type { ViewType, Keypoint3D, SessionView } from "@/types";
 
@@ -29,12 +30,10 @@ export default function ThreeDPage() {
 
   const {
     views, keypoints, clicks, activeView,
-    selectedLabel, matWidthCm, matHeightCm, viewCorners, loading, saving, error, savedFlash,
-    addView, calibrateView, resetScale, placeClick, deleteKeypoint, refineKeypointXY,
+    selectedLabel, dogId, matWidthCm, loading, saving, error, savedFlash,
+    addView, calibrateView, resetScale, placeClick, deleteKeypoint,
     setActiveView, setLabel,
   } = use3DSession(id);
-
-  const topViewHasPose = views.some(v => v.view_type === "top" && v.camera_pose);
 
   // ビューが変わったらキャリブ点をリセット
   useEffect(() => {
@@ -90,7 +89,7 @@ export default function ThreeDPage() {
   const isCalibMode = activeView && !activeView.pixels_per_cm;
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 flex flex-col gap-4">
+    <div className="max-w-[1600px] mx-auto px-4 py-6 flex flex-col gap-4">
 
       {/* ── ヘッダー ──────────────────────────────── */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -156,7 +155,7 @@ export default function ThreeDPage() {
 
       {/* ── 配置モード ─────────────────────────────── */}
       {panelMode === "place" && (
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4">
 
           {/* 左: ビュー切り替え + キャンバス */}
           <div className="flex flex-col gap-3">
@@ -205,7 +204,7 @@ export default function ThreeDPage() {
             )}
 
             {/* キャンバス */}
-            <div className="relative rounded-2xl overflow-hidden bg-warm-gutter" style={{ height: 480 }}>
+            <div className="relative rounded-2xl overflow-hidden bg-warm-gutter" style={{ height: "min(74vh, 900px)" }}>
               {activeView ? (
                 <ViewCanvas
                   view={activeView}
@@ -214,7 +213,6 @@ export default function ThreeDPage() {
                   selectedLabel={selectedLabel}
                   calibPoints={calibPoints}
                   onViewClick={handleCanvasClick}
-                  detectedCorners={viewCorners[activeView.id]}
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-sm text-ink-muted">
@@ -277,13 +275,17 @@ export default function ThreeDPage() {
           </div>
 
           {/* 右パネル */}
-          <div className="flex flex-col gap-4 overflow-y-auto max-h-[640px] pr-1">
+          <div className="flex flex-col gap-4 overflow-y-auto pr-1" style={{ maxHeight: "min(74vh, 900px)" }}>
 
-            {/* マット印刷 */}
-            <section>
-              <p className="text-xs font-bold text-ink-muted mb-2">採寸マット</p>
-              <MatPdfButton widthCm={matWidthCm} heightCm={matHeightCm} />
-            </section>
+            {/* 犬の情報 */}
+            {dogId && (
+              <section>
+                <p className="text-xs font-bold text-ink-muted mb-2">犬の情報</p>
+                <div className="rounded-2xl bg-warm-card border border-border-default p-3">
+                  <DogInfoForm dogId={dogId} />
+                </div>
+              </section>
+            )}
 
             <section>
               <p className="text-xs font-bold text-ink-muted mb-2">ビュー管理</p>
@@ -298,7 +300,6 @@ export default function ThreeDPage() {
                       onUpload={addView}
                       onResetScale={resetScale}
                       saving={saving}
-                      detectedCorners={v ? viewCorners[v.id] : undefined}
                     />
                   );
                 })}
@@ -307,59 +308,17 @@ export default function ThreeDPage() {
 
             {!isCalibMode && (
               <section>
-                {topViewHasPose && (
-                  <p className="text-[10px] text-accent-blue mb-1.5 px-0.5">
-                    姿勢推定済み — 3軸確定済みのポイントに「XY補正」が使えます
-                  </p>
-                )}
                 <Keypoint3DList
                   keypoints={keypoints}
                   selectedLabel={selectedLabel}
                   onSelectLabel={setLabel}
                   onDelete={deleteKeypoint}
-                  onRefineXY={refineKeypointXY}
-                  canRefineXY={topViewHasPose}
                 />
               </section>
             )}
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// ── マットPDFダウンロードボタン ───────────────────────────────
-function MatPdfButton({ widthCm, heightCm }: { widthCm: number; heightCm: number }) {
-  const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
-  if (!backend) {
-    return (
-      <p className="text-xs text-ink-muted">
-        バックエンド未設定（NEXT_PUBLIC_BACKEND_URL）
-      </p>
-    );
-  }
-  const url = `${backend}/api/v1/mat-pdf`;
-  return (
-    <div className="flex flex-col gap-2 p-3 rounded-2xl bg-warm-card border border-border-default">
-      <p className="text-xs text-ink-muted">
-        マットサイズ:{" "}
-        <span className="font-bold text-ink-primary">{widthCm} cm</span>
-        {" × "}
-        <span className="font-bold text-ink-primary">{heightCm} cm</span>
-      </p>
-      <p className="text-[10px] text-ink-muted leading-relaxed">
-        1ページ目: 床マット（ID 0–3）<br />
-        2ページ目: 壁マット（ID 4–7）<br />
-        四隅に切り取って貼り付けてください
-      </p>
-      <a
-        href={url}
-        download
-        className="block w-full text-center px-3 py-2 rounded-xl bg-accent-blue text-white text-xs font-bold hover:opacity-90 transition-opacity"
-      >
-        マーカーPDF をダウンロード
-      </a>
     </div>
   );
 }
@@ -411,7 +370,7 @@ function View3DPanel({
           keypoints={keypoints}
           selectedLabel={selectedLabel}
           className="w-full"
-          style={{ height: 560 }}
+          style={{ height: "min(78vh, 900px)" }}
         />
 
         {/* 写真パネル（表示中のものだけ） */}

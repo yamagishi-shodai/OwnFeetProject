@@ -62,5 +62,27 @@ export function useDogs() {
     return { dog: data, error: null };
   }
 
-  return { dogs, loading, error, createDog, refetch: fetchDogs };
+  async function deleteDog(id: string): Promise<{ error: string | null }> {
+    // 先にこの犬の採寸セッションを削除（session_views/keypoints_3d/view_clicks は DB 側の
+    // ON DELETE CASCADE で連動削除される）。それから犬本体を削除する
+    const { error: sessionsErr } = await supabase
+      .from("measurement_sessions")
+      .delete()
+      .eq("dog_id", id);
+    if (sessionsErr) {
+      console.error("[deleteDog] sessions", sessionsErr);
+      return { error: sessionsErr.message };
+    }
+
+    const { error: dogErr } = await supabase.from("dogs").delete().eq("id", id);
+    if (dogErr) {
+      console.error("[deleteDog] dog", dogErr);
+      return { error: dogErr.message };
+    }
+
+    setDogs((prev) => prev.filter((d) => d.id !== id));
+    return { error: null };
+  }
+
+  return { dogs, loading, error, createDog, deleteDog, refetch: fetchDogs };
 }

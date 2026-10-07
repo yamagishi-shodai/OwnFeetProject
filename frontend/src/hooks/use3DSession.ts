@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useReducer, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { pixelToWorld, pixelToWorldH, intersectPlaneZ, merge3DPoint, VIEW_AXIS_MAP } from "@/lib/coords-3d";
-import { detectAruco, type NormalizedCorner } from "@/lib/aruco-api";
+import { pixelToWorld, merge3DPoint, VIEW_AXIS_MAP } from "@/lib/coords-3d";
+import { uploadSessionView } from "@/lib/session-views";
 import type {
-  SessionView, SessionViewInsert, Keypoint3D, Keypoint3DInsert,
+  SessionView, Keypoint3D, Keypoint3DInsert,
   ViewClick, ViewType,
 } from "@/types";
 
@@ -17,10 +17,9 @@ type State = {
   clicks: ViewClick[];
   activeViewId: string | null;
   selectedLabel: string;
+  dogId: string | null;
   matWidthCm: number;
   matHeightCm: number;
-  markerSizeCm: number;
-  viewCorners: Record<string, NormalizedCorner[]>;
   loading: boolean;
   saving: boolean;
   error: string | null;
@@ -30,17 +29,16 @@ const INITIAL: State = {
   views: [], keypoints: [], clicks: [],
   activeViewId: null,
   selectedLabel: "右肩",
+  dogId: null,
   matWidthCm: 0,
   matHeightCm: 0,
-  markerSizeCm: 0,
-  viewCorners: {},
   loading: true, saving: false, error: null,
 };
 
 // ── Actions ────────────────────────────────────────────────────
 
 type Action =
-  | { type: "LOADED"; views: SessionView[]; keypoints: Keypoint3D[]; clicks: ViewClick[]; matWidthCm: number; matHeightCm: number; markerSizeCm: number }
+  | { type: "LOADED"; views: SessionView[]; keypoints: Keypoint3D[]; clicks: ViewClick[]; dogId: string | null; matWidthCm: number; matHeightCm: number }
   | { type: "SET_ACTIVE_VIEW"; viewId: string }
   | { type: "SET_LABEL"; label: string }
   | { type: "VIEW_ADDED"; view: SessionView }
@@ -49,7 +47,6 @@ type Action =
   | { type: "CLICK_ADDED"; click: ViewClick }
   | { type: "CLICK_UPDATED"; click: ViewClick }
   | { type: "KEYPOINT_DELETED"; id: string }
-  | { type: "VIEW_CORNERS"; viewId: string; corners: NormalizedCorner[] }
   | { type: "SAVING" }
   | { type: "DONE" }
   | { type: "ERROR"; message: string };
@@ -58,7 +55,7 @@ function reducer(s: State, a: Action): State {
   switch (a.type) {
     case "LOADED":
       return { ...s, views: a.views, keypoints: a.keypoints, clicks: a.clicks,
-               matWidthCm: a.matWidthCm, matHeightCm: a.matHeightCm, markerSizeCm: a.markerSizeCm,
+               dogId: a.dogId, matWidthCm: a.matWidthCm, matHeightCm: a.matHeightCm,
                activeViewId: a.views[0]?.id ?? null, loading: false };
     case "SET_ACTIVE_VIEW": return { ...s, activeViewId: a.viewId };
     case "SET_LABEL":       return { ...s, selectedLabel: a.label };
@@ -80,8 +77,6 @@ function reducer(s: State, a: Action): State {
     case "KEYPOINT_DELETED":
       return { ...s, keypoints: s.keypoints.filter(k => k.id !== a.id),
                clicks: s.clicks.filter(c => c.keypoint_3d_id !== a.id) };
-    case "VIEW_CORNERS":
-      return { ...s, viewCorners: { ...s.viewCorners, [a.viewId]: a.corners } };
     case "SAVING": return { ...s, saving: true, error: null };
     case "DONE":   return { ...s, saving: false };
     case "ERROR":  return { ...s, saving: false, error: a.message };
@@ -98,7 +93,7 @@ export function use3DSession(sessionId: string) {
   useEffect(() => {
     async function load() {
       const [{ data: session }, { data: views }, { data: keypoints }, { data: clicks }] = await Promise.all([
-        supabase.from("measurement_sessions").select("mat_width_cm, mat_height_cm, marker_size_cm").eq("id", sessionId).single(),
+        supabase.from("measurement_sessions").select("dog_id, mat_width_cm, mat_height_cm").eq("id", sessionId).single(),
         supabase.from("session_views").select("*").eq("session_id", sessionId).order("created_at"),
         supabase.from("keypoints_3d").select("*").eq("session_id", sessionId).order("created_at"),
         supabase.from("view_clicks").select("*, keypoints_3d!inner(session_id)").eq("keypoints_3d.session_id", sessionId),
@@ -108,9 +103,9 @@ export function use3DSession(sessionId: string) {
         views: views ?? [],
         keypoints: keypoints ?? [],
         clicks: clicks ?? [],
+        dogId: session?.dog_id ?? null,
         matWidthCm: session?.mat_width_cm ?? 0,
         matHeightCm: session?.mat_height_cm ?? 0,
-        markerSizeCm: session?.marker_size_cm ?? 0,
       });
     }
     load();
@@ -119,51 +114,12 @@ export function use3DSession(sessionId: string) {
   // ── ビュー追加（画像アップロード） ──────────────────────────
   const addView = useCallback(async (viewType: ViewType, file: File) => {
     dispatch({ type: "SAVING" });
-
-    const { data: viewRecord, error: insertErr } = await supabase
-      .from("session_views")
-      .insert({ session_id: sessionId, view_type: viewType, image_url: null, pixels_per_cm: null } as SessionViewInsert)
-      .select().single();
-
-    if (insertErr || !viewRecord) {
-      dispatch({ type: "ERROR", message: "ビュー作成失敗: " + insertErr?.message }); return;
+    const { view, error } = await uploadSessionView(sessionId, viewType, file);
+    if (error || !view) {
+      dispatch({ type: "ERROR", message: error ?? "アップロード失敗" }); return;
     }
-
-    const ext = file.name.split(".").pop();
-    const path = `${sessionId}/3d_${viewType}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("sessions").upload(path, file, { upsert: true });
-    if (uploadErr) {
-      dispatch({ type: "ERROR", message: "アップロード失敗: " + uploadErr.message }); return;
-    }
-
-    const { data: urlData } = supabase.storage.from("sessions").getPublicUrl(path);
-    const { data: updated } = await supabase
-      .from("session_views").update({ image_url: urlData.publicUrl }).eq("id", viewRecord.id).select().single();
-
-    const result = await detectAruco(file, state.matWidthCm, state.matHeightCm, state.markerSizeCm);
-    if (result) {
-      await supabase.from("session_views")
-        .update({
-          pixels_per_cm: result.pixelsPerCm,
-          homography_matrix: result.homography,
-          camera_pose: result.cameraPose,
-        })
-        .eq("id", viewRecord.id);
-      dispatch({
-        type: "VIEW_ADDED",
-        view: {
-          ...(updated ?? viewRecord),
-          image_url: urlData.publicUrl,
-          pixels_per_cm: result.pixelsPerCm,
-          homography_matrix: result.homography,
-          camera_pose: result.cameraPose,
-        },
-      });
-      dispatch({ type: "VIEW_CORNERS", viewId: viewRecord.id, corners: result.corners });
-    } else {
-      dispatch({ type: "VIEW_ADDED", view: updated ?? { ...viewRecord, image_url: urlData.publicUrl } });
-    }
-  }, [sessionId, state.matWidthCm, state.matHeightCm, state.markerSizeCm]);
+    dispatch({ type: "VIEW_ADDED", view });
+  }, [sessionId]);
 
   // ── キャリブレーション ────────────────────────────────────
   const calibrateView = useCallback(async (
@@ -202,10 +158,7 @@ export function use3DSession(sessionId: string) {
     const mapOverride = axisFlip
       ? { ...baseMap, ...axisFlip }
       : undefined;
-    const partial = view.homography_matrix
-      ? pixelToWorldH(pixelX, pixelY, view.homography_matrix, view.view_type,
-                      state.matWidthCm, state.matHeightCm, mapOverride)
-      : pixelToWorld(pixelX, pixelY, view.view_type, view.pixels_per_cm!, imgW, imgH, mapOverride);
+    const partial = pixelToWorld(pixelX, pixelY, view.view_type, view.pixels_per_cm!, imgW, imgH, mapOverride);
     const existing = state.keypoints.find(k => k.label === state.selectedLabel);
 
     let keypoint: Keypoint3D;
@@ -249,7 +202,7 @@ export function use3DSession(sessionId: string) {
     }
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1800);
-  }, [state.views, state.keypoints, state.selectedLabel, sessionId, state.matWidthCm, state.matHeightCm]);
+  }, [state.views, state.keypoints, state.selectedLabel, sessionId]);
 
   // ── キーポイント削除 ──────────────────────────────────────
   const deleteKeypoint = useCallback(async (id: string) => {
@@ -257,53 +210,14 @@ export function use3DSession(sessionId: string) {
     dispatch({ type: "KEYPOINT_DELETED", id });
   }, []);
 
-  // ── XY座標補正（手動トリガー） ────────────────────────────
-  // トップビューで camera_pose があり、z_cm が既知の場合に
-  // Z=z_cm 平面と光線の交点で (x_cm, y_cm) を補正する
-  const refineKeypointXY = useCallback(async (keypointId: string) => {
-    const kp = state.keypoints.find(k => k.id === keypointId);
-    if (!kp || kp.z_cm == null) return;
-
-    const topView = state.views.find(v => v.view_type === "top" && v.camera_pose);
-    if (!topView?.camera_pose) return;
-
-    const click = state.clicks.find(c =>
-      c.view_id === topView.id && c.keypoint_3d_id === keypointId
-    );
-    if (!click) return;
-
-    const pt = intersectPlaneZ(click.pixel_x, click.pixel_y, topView.camera_pose, kp.z_cm);
-    if (!pt) return;
-
-    // solvePnP ワールド座標 → 体軸座標
-    // ワールド X = mat幅方向、ワールド Y = mat奥行き方向（壁から離れる方向）
-    // マーカー中心の原点オフセット M=5cm + mat中心への補正
-    const MARGIN_CM = 5.0;
-    const relX = pt.y - (MARGIN_CM + state.matHeightCm / 2); // 奥行き → 体前後(X軸)
-    const relY = pt.x - (MARGIN_CM + state.matWidthCm  / 2); // 幅方向 → 体左右(Y軸)
-    const corrected_x = -relX; // px_inverted=true (top view)
-    const corrected_y =  relY; // py_inverted=false (top view)
-
-    dispatch({ type: "SAVING" });
-    const { data, error } = await supabase
-      .from("keypoints_3d")
-      .update({ x_cm: corrected_x, y_cm: corrected_y })
-      .eq("id", keypointId)
-      .select().single();
-    if (error || !data) { dispatch({ type: "ERROR", message: "XY補正失敗" }); return; }
-    dispatch({ type: "KEYPOINT_UPSERTED", keypoint: data });
-  }, [state.keypoints, state.views, state.clicks, state.matWidthCm, state.matHeightCm]);
-
   return {
     ...state,
     savedFlash,
     addView,
-    viewCorners: state.viewCorners,
     calibrateView,
     resetScale,
     placeClick,
     deleteKeypoint,
-    refineKeypointXY,
     setActiveView: (id: string) => dispatch({ type: "SET_ACTIVE_VIEW", viewId: id }),
     setLabel: (label: string) => dispatch({ type: "SET_LABEL", label }),
     activeView: state.views.find(v => v.id === state.activeViewId) ?? null,

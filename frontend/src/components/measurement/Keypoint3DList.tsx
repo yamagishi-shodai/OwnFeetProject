@@ -8,8 +8,6 @@ type Props = {
   selectedLabel: string;
   onSelectLabel: (label: string) => void;
   onDelete: (id: string) => void;
-  onRefineXY?: (id: string) => void;
-  canRefineXY?: boolean;
 };
 
 export const PRESET_LABELS = [
@@ -38,7 +36,7 @@ function AxisBadge({ confirmed, axis }: { confirmed: boolean; axis: string }) {
   );
 }
 
-export function Keypoint3DList({ keypoints, selectedLabel, onSelectLabel, onDelete, onRefineXY, canRefineXY }: Props) {
+export function Keypoint3DList({ keypoints, selectedLabel, onSelectLabel, onDelete }: Props) {
   const usedLabels = new Set(keypoints.map(k => k.label));
   const allLabels = Array.from(new Set([...PRESET_LABELS, ...keypoints.map(k => k.label)]));
 
@@ -95,15 +93,6 @@ export function Keypoint3DList({ keypoints, selectedLabel, onSelectLabel, onDele
                       <AxisBadge axis="X" confirmed={status.x} />
                       <AxisBadge axis="Y" confirmed={status.y} />
                       <AxisBadge axis="Z" confirmed={status.z} />
-                      {canRefineXY && status.complete && onRefineXY && (
-                        <button
-                          onClick={e => { e.stopPropagation(); onRefineXY(kp.id); }}
-                          title="カメラ姿勢でXY補正"
-                          className="ml-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-accent-blue/15 text-accent-blue hover:bg-accent-blue/30 transition-colors"
-                        >
-                          XY補正
-                        </button>
-                      )}
                       <button
                         onClick={e => { e.stopPropagation(); onDelete(kp.id); }}
                         className="ml-1 text-ink-muted hover:text-accent-red text-sm leading-none"

@@ -131,7 +131,7 @@ export function DogInfoForm({ dogId, onCreate }: Props) {
 }
 
 // 生年月日から「3歳2ヶ月」のような表記を作る
-function ageText(birthDate: string): string {
+export function ageText(birthDate: string): string {
   const b = new Date(birthDate);
   const now = new Date();
   let months = (now.getFullYear() - b.getFullYear()) * 12 + (now.getMonth() - b.getMonth());

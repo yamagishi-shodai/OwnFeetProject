@@ -24,8 +24,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja" className={`${mPlusRounded.variable} h-full`}>
-      <body className="min-h-full flex flex-col bg-warm-sub text-ink-primary">
-        <header className="sticky top-0 z-50 bg-warm-main border-b border-border-light">
+      <body className="min-h-full flex flex-col bg-warm-sub text-ink-primary print:bg-white">
+        <header className="print:hidden sticky top-0 z-50 bg-warm-main border-b border-border-light">
           <div className="px-5 py-2.5 flex items-center gap-5">
             <Link href="/" className="text-lg font-bold text-ink-dark tracking-tight shrink-0">
               採寸プラットフォーム

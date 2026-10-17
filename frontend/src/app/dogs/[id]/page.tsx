@@ -69,9 +69,18 @@ function DogKartePage() {
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {session && (
-            <Link href={`/sessions/${session.id}/export`} className="text-xs text-accent-blue hover:underline">
-              JSON出力
-            </Link>
+            <>
+              <Link
+                href={`/dogs/${id}/print?session=${session.id}`}
+                target="_blank"
+                className="text-xs text-accent-blue hover:underline"
+              >
+                PDF出力
+              </Link>
+              <Link href={`/sessions/${session.id}/export`} className="text-xs text-accent-blue hover:underline">
+                JSON出力
+              </Link>
+            </>
           )}
           <button
             type="button"

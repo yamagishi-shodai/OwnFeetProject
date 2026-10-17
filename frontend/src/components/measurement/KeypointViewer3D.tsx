@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { Canvas, useThree } from "@react-three/fiber";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Html, Line, GizmoHelper, GizmoViewport } from "@react-three/drei";
 import * as THREE from "three";
 import { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js";
@@ -316,6 +316,22 @@ function PhotoPlane({ photo, depth }: { photo: OverlayPhoto; depth: number }) {
   );
 }
 
+// ── 画像化（カルテの PDF 用） ─────────────────────────────────────
+// カメラの位置合わせと描画が落ち着くまで数フレーム待ってから、canvas を PNG にして1回だけ渡す
+const SNAPSHOT_AFTER_FRAMES = 20;
+
+function Snapshot({ onSnapshot }: { onSnapshot: (dataUrl: string) => void }) {
+  const gl = useThree(s => s.gl);
+  const frames = useRef(0);
+  const done = useRef(false);
+  useFrame(() => {
+    if (done.current || ++frames.current < SNAPSHOT_AFTER_FRAMES) return;
+    done.current = true;
+    onSnapshot(gl.domElement.toDataURL("image/png"));
+  });
+  return null;
+}
+
 // ── メインシーン ──────────────────────────────────────────────
 // ── 点の広がりに合わせてカメラを自動で引く ──────────────────────
 // 点群を包む球（中心 center・半径 radius）が縦横どちらの画角にも収まる距離に置く
@@ -366,12 +382,13 @@ function FitCamera({ cx, cy, cz, radius, dir, fov, fitKey }: {
 }
 
 function Scene({ keypoints, selectedLabel, center, radius, groundY, showLabels, metrics, midY, showSolid, adoptedMetrics, wheelchair,
-  photo, photoDepth, camDir, fov, fitKey, showDog }: {
+  photo, photoDepth, camDir, fov, fitKey, showDog, showGizmo }: {
   keypoints: Keypoint3D[]; selectedLabel: string; center: [number, number, number]; radius: number;
   groundY: number; showLabels: boolean; metrics: BodyMetrics | null; midY: number; showSolid: boolean;
   adoptedMetrics: MetricKey[]; wheelchair: WheelchairPlacement | null;
   photo: OverlayPhoto | null; photoDepth: number; camDir: THREE.Vector3; fov: number; fitKey: number;
   showDog: boolean;
+  showGizmo: boolean;
 }) {
   return (
     <>
@@ -403,12 +420,12 @@ function Scene({ keypoints, selectedLabel, center, radius, groundY, showLabels, 
       />
       <FitCamera cx={center[0]} cy={center[1]} cz={center[2]} radius={radius} dir={camDir} fov={fov} fitKey={fitKey} />
 
-      <GizmoHelper alignment="bottom-right" margin={[72, 72]}>
+      {showGizmo && <GizmoHelper alignment="bottom-right" margin={[72, 72]}>
         <GizmoViewport
           axisColors={["#556E97", "#3E6954", "#D16340"]}
           labelColor="white"
         />
-      </GizmoHelper>
+      </GizmoHelper>}
     </>
   );
 }
@@ -428,9 +445,14 @@ type Props = {
   wheelchair?: WheelchairPlacement | null;
   // 真横・真上の視点で重ねる写真
   photos?: Partial<Record<OverlayKind, OverlayPhoto>>;
+  // カルテの PDF 用: 渡すと描画が落ち着いたところで canvas を PNG にして返す
+  onSnapshot?: (dataUrl: string) => void;
+  // 凡例・切り替えボタン・軸ラベル・操作説明・寸法線を出さず、絵だけにする（画像化用）
+  hideControls?: boolean;
 };
 
-export function KeypointViewer3D({ keypoints, selectedLabel, className = "", style, adoptedMetrics = [], frameKeypoints, wheelchair = null, photos = {} }: Props) {
+export function KeypointViewer3D({ keypoints, selectedLabel, className = "", style, adoptedMetrics = [], frameKeypoints, wheelchair = null, photos = {},
+  onSnapshot, hideControls = false }: Props) {
   const [showLabels, setShowLabels] = useState(false);
   const [showDims, setShowDims] = useState(true);
   const [showSolid, setShowSolid] = useState(true);
@@ -487,120 +509,127 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
       <Canvas
         // 初期位置は FitCamera が決める。-Z 側（Y_db 負側）から見て X+（頭方向）を画面左に向ける
         camera={{ fov: 50 }}
-        gl={{ antialias: true, toneMapping: THREE.NoToneMapping }}
+        // 画像化するときは描画後もバッファを残す（toDataURL で読めるように）
+        gl={{ antialias: true, toneMapping: THREE.NoToneMapping, preserveDrawingBuffer: !!onSnapshot }}
         onCreated={({ gl }) => {
           gl.setClearColor("#eae4e1");
         }}
       >
         <Scene
           keypoints={keypoints} selectedLabel={selectedLabel} center={center} radius={radius}
-          groundY={groundY} showLabels={showLabels} metrics={showDims ? metrics : null} midY={midY} showSolid={showSolid} adoptedMetrics={adoptedMetrics}
+          groundY={groundY} showLabels={showLabels && !hideControls} metrics={showDims && !hideControls ? metrics : null} midY={midY} showSolid={showSolid} adoptedMetrics={adoptedMetrics}
           wheelchair={showWheelchair ? wheelchair : null}
           photo={photo} photoDepth={photoDepth} camDir={camDir}
           fov={viewMode === "free" ? FREE_FOV : FLAT_FOV} fitKey={fitKey}
           showDog={!wheelchair || showDog}
+          showGizmo={!hideControls}
         />
+        {onSnapshot && <Snapshot onSnapshot={onSnapshot} />}
       </Canvas>
 
-      {/* 凡例 */}
-      <div className="absolute top-3 left-3 flex flex-col gap-1 text-[11px] pointer-events-none">
-        <LegendItem color="#D16340" label="選択中" />
-        <LegendItem color="#3E6954" label="3軸確定" />
-        <LegendItem color="#cfaa55" label="一部確定" dim />
-        <button
-          type="button"
-          onClick={() => setShowLabels(v => !v)}
-          aria-pressed={showLabels}
-          className={`pointer-events-auto mt-1 px-2 py-1 rounded font-bold transition-colors
-            ${showLabels ? "bg-ink-primary text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
-        >
-          点名 {showLabels ? "ON" : "OFF"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowDims(v => !v)}
-          aria-pressed={showDims}
-          className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
-            ${showDims ? "bg-[#556E97] text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
-        >
-          寸法 {showDims ? "ON" : "OFF"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowSolid(v => !v)}
-          aria-pressed={showSolid}
-          className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
-            ${showSolid ? "bg-accent-green text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
-        >
-          ソリッド {showSolid ? "ON" : "OFF"}
-        </button>
-        {wheelchair && (
-          <button
-            type="button"
-            onClick={() => setShowWheelchair(v => !v)}
-            aria-pressed={showWheelchair}
-            className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
-              ${showWheelchair ? "bg-[#556E97] text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
-          >
-            車椅子 {showWheelchair ? "ON" : "OFF"}
-          </button>
-        )}
-        {wheelchair && (
-          <button
-            type="button"
-            onClick={() => setShowDog(v => !v)}
-            aria-pressed={showDog}
-            className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
-              ${showDog ? "bg-[#8a7a6a] text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
-          >
-            犬 {showDog ? "ON" : "OFF"}
-          </button>
-        )}
-
-        {/* 視点の切り替え。真横・真上では写真を重ねられる */}
-        <div className="pointer-events-auto mt-2 flex rounded overflow-hidden border border-white/70">
-          {([["free", "3D"], ["side", "真横"], ["top", "真上"]] as const).map(([mode, label]) => (
+      {!hideControls && (
+        <>
+          {/* 凡例 */}
+          <div className="absolute top-3 left-3 flex flex-col gap-1 text-[11px] pointer-events-none">
+            <LegendItem color="#D16340" label="選択中" />
+            <LegendItem color="#3E6954" label="3軸確定" />
+            <LegendItem color="#cfaa55" label="一部確定" dim />
             <button
-              key={mode}
               type="button"
-              onClick={() => selectView(mode)}
-              aria-pressed={viewMode === mode}
-              className={`px-2 py-1 font-bold transition-colors
-                ${viewMode === mode ? "bg-ink-primary text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
+              onClick={() => setShowLabels(v => !v)}
+              aria-pressed={showLabels}
+              className={`pointer-events-auto mt-1 px-2 py-1 rounded font-bold transition-colors
+                ${showLabels ? "bg-ink-primary text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
             >
-              {label}
+              点名 {showLabels ? "ON" : "OFF"}
             </button>
-          ))}
-        </div>
-        {viewMode !== "free" && (modePhoto ? (
-          <button
-            type="button"
-            onClick={() => setShowPhoto(v => !v)}
-            aria-pressed={showPhoto}
-            className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
-              ${showPhoto ? "bg-[#cfaa55] text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
-          >
-            写真 {showPhoto ? "ON" : "OFF"}
-          </button>
-        ) : (
-          <span className="px-2 py-1 rounded bg-white/70 text-ink-muted">
-            {viewMode === "side" ? "側面" : "真上"}の写真に点が2つ以上必要です
-          </span>
-        ))}
-      </div>
+            <button
+              type="button"
+              onClick={() => setShowDims(v => !v)}
+              aria-pressed={showDims}
+              className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
+                ${showDims ? "bg-[#556E97] text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
+            >
+              寸法 {showDims ? "ON" : "OFF"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSolid(v => !v)}
+              aria-pressed={showSolid}
+              className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
+                ${showSolid ? "bg-accent-green text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
+            >
+              ソリッド {showSolid ? "ON" : "OFF"}
+            </button>
+            {wheelchair && (
+              <button
+                type="button"
+                onClick={() => setShowWheelchair(v => !v)}
+                aria-pressed={showWheelchair}
+                className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
+                  ${showWheelchair ? "bg-[#556E97] text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
+              >
+                車椅子 {showWheelchair ? "ON" : "OFF"}
+              </button>
+            )}
+            {wheelchair && (
+              <button
+                type="button"
+                onClick={() => setShowDog(v => !v)}
+                aria-pressed={showDog}
+                className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
+                  ${showDog ? "bg-[#8a7a6a] text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
+              >
+                犬 {showDog ? "ON" : "OFF"}
+              </button>
+            )}
 
-      {adoptedMetrics.length > 0 && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-[#556E97] text-white text-[11px] font-bold pointer-events-none">
-          実測値に合わせて補正表示中
-        </div>
+            {/* 視点の切り替え。真横・真上では写真を重ねられる */}
+            <div className="pointer-events-auto mt-2 flex rounded overflow-hidden border border-white/70">
+              {([["free", "3D"], ["side", "真横"], ["top", "真上"]] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => selectView(mode)}
+                  aria-pressed={viewMode === mode}
+                  className={`px-2 py-1 font-bold transition-colors
+                    ${viewMode === mode ? "bg-ink-primary text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {viewMode !== "free" && (modePhoto ? (
+              <button
+                type="button"
+                onClick={() => setShowPhoto(v => !v)}
+                aria-pressed={showPhoto}
+                className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
+                  ${showPhoto ? "bg-[#cfaa55] text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
+              >
+                写真 {showPhoto ? "ON" : "OFF"}
+              </button>
+            ) : (
+              <span className="px-2 py-1 rounded bg-white/70 text-ink-muted">
+                {viewMode === "side" ? "側面" : "真上"}の写真に点が2つ以上必要です
+              </span>
+            ))}
+          </div>
+
+          {adoptedMetrics.length > 0 && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-[#556E97] text-white text-[11px] font-bold pointer-events-none">
+              実測値に合わせて補正表示中
+            </div>
+          )}
+
+          {/* 軸凡例 */}
+          <div className="absolute top-3 right-16 flex flex-col gap-0.5 text-[11px] pointer-events-none">
+            <span className="font-bold text-[#556E97]">X: 前後（体長）</span>
+            <span className="font-bold text-[#3E6954]">Y: 左右（体幅）</span>
+            <span className="font-bold text-[#D16340]">Z: 上下（高さ）</span>
+          </div>
+        </>
       )}
-
-      {/* 軸凡例 */}
-      <div className="absolute top-3 right-16 flex flex-col gap-0.5 text-[11px] pointer-events-none">
-        <span className="font-bold text-[#556E97]">X: 前後（体長）</span>
-        <span className="font-bold text-[#3E6954]">Y: 左右（体幅）</span>
-        <span className="font-bold text-[#D16340]">Z: 上下（高さ）</span>
-      </div>
 
       {/* 3軸そろった参照点がまだない */}
       {complete.length === 0 && (
@@ -610,9 +639,11 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
         </div>
       )}
 
-      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[11px] text-ink-muted pointer-events-none">
-        ドラッグ: 回転 ／ スクロール: ズーム ／ 右ドラッグ: パン
-      </div>
+      {!hideControls && (
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[11px] text-ink-muted pointer-events-none">
+          ドラッグ: 回転 ／ スクロール: ズーム ／ 右ドラッグ: パン
+        </div>
+      )}
     </div>
   );
 }

@@ -59,7 +59,7 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <nav className="w-56 shrink-0 border-r border-border-light bg-warm-main px-3 py-4 flex flex-col gap-1">
+    <nav className="print:hidden w-56 shrink-0 border-r border-border-light bg-warm-main px-3 py-4 flex flex-col gap-1">
       {NAV_ITEMS.map((item) => {
         const active = pathname === item.href;
         return (

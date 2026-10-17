@@ -17,7 +17,7 @@ import { DefaultViewImage } from "./DefaultViewImage";
 import { BodyMetricsCard } from "./BodyMetricsCard";
 import { WheelchairDesignCard } from "./WheelchairDesignCard";
 import { buildOverlayPhotos } from "@/lib/photo-overlay";
-import { WHEELCHAIR_KEYS, estimateWheelchair, resolveWheelchair, placeWheelchair, type WheelchairDesign, type WheelchairValues } from "@/lib/wheelchair";
+import { autoWheelchairValues, estimateWheelchair, resolveWheelchair, placeWheelchair, type WheelchairDesign } from "@/lib/wheelchair";
 import type { KarteSession } from "@/hooks/useKarte";
 import { VIEW_LABELS } from "@/types";
 import type { ViewType } from "@/types";
@@ -87,12 +87,10 @@ export function Karte({ dogId, session, onAddPhoto, onReplacePhoto, onNewSession
     [wheelchairEstimated, displayKeypoints, wheelchairDesign]
   );
   // 各項目の「自動」の値。車輪径・横フレーム高さは、手で変えたフレーム高さなどに合わせて計算し直した値を出す
-  const wheelchairAuto = useMemo(() => {
-    if (!wheelchairEstimated) return null;
-    const out = { ...wheelchairEstimated } as WheelchairValues;
-    for (const k of WHEELCHAIR_KEYS) out[k] = resolveWheelchair(wheelchairEstimated, { ...wheelchairDesign, [k]: null })[k];
-    return out;
-  }, [wheelchairEstimated, wheelchairDesign]);
+  const wheelchairAuto = useMemo(
+    () => wheelchairEstimated && autoWheelchairValues(wheelchairEstimated, wheelchairDesign),
+    [wheelchairEstimated, wheelchairDesign]
+  );
 
   // スライダーは動かすたびに変わるので、画面にはすぐ反映し、保存は止まってから少し待って1回だけ行う
   const wheelchairSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

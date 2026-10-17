@@ -96,6 +96,14 @@ export function resolveWheelchair(estimated: WheelchairValues, design: Wheelchai
   return out;
 }
 
+// 各項目の「自動」の値（その項目だけ手入力がないとした値）。
+// 車輪径・横フレーム高さは、手で変えたフレーム高さなどに合わせて計算し直した値になる
+export function autoWheelchairValues(estimated: WheelchairValues, design: WheelchairDesign | null | undefined): WheelchairValues {
+  const out = { ...estimated };
+  for (const k of WHEELCHAIR_KEYS) out[k] = resolveWheelchair(estimated, { ...design, [k]: null })[k];
+  return out;
+}
+
 // 垂直材長: 開いたフレームに付けた車輪がちょうど地面に接する長さ（元モデルの calculate_vertical_length）
 export function verticalLengthFor(height: number, wheelDiameter: number): number {
   const S = FRAME_SPEC;
@@ -117,12 +125,13 @@ export const FRAME_SPEC = {
   braceAngle: 45,         // 補助斜め材の角度（deg）
   braceBottomHeight: 6,   // 補助斜め材の下端（垂直材の下端から）
   crossHeight: 15,        // 垂直材に追加する横フレーム（垂直材の下端から）
-  frameOuterR: 1.0, frameInnerR: 0.6,   // 側面フレームのパイプ
+  frameOuterR: 0.8, frameInnerR: 0.6,   // 側面フレームのパイプ（外径 16mm）
   crossOuterR: 0.8, crossInnerR: 0.6,   // 横フレームのパイプ
   jointDiameter: 9,
   jointClearance: 0.02,   // パイプとジョイントの半径方向クリアランス
   jointWall: 0.2,         // ジョイント肉厚
   jointInsertDepth: 2.0,  // 中空ジョイントへの差し込み長
+  jointInnerExtra: 2.5,   // 内側の形をジョイントの外へ延ばす長さ（元モデルの inner_extra）
   elbowBendRadius: 1.8,   // L字エルボの標準曲がり半径
   elbowRadiusClearance: 0.1,
   angleTol: 1,            // 直角とみなす角度の許容（deg）
@@ -176,6 +185,7 @@ export type JointRecord = {
   type: "hollow" | "double";  // 直角なら中空、それ以外は二重（内外を別部品で作る）
   angle: number;              // 主管と枝管の角度（deg）
   count: number;
+  dirs: V3[];                 // 中心から各差し込み口への向き（元モデルの座標系、開き角で回す前）
 };
 
 export type WheelchairFrame = {
@@ -315,9 +325,12 @@ export function buildWheelchairFrame(v: WheelchairValues): WheelchairFrame | nul
       const tFront = jointType(angleDeg([1, 0, 0], toBrace));
       const tLower = jointType(angleDeg([0, 0, 1], scale(toBrace, -1)));
       sideJoints = [
-        { name: "上部T字（支柱上）", kind: "T", type: tTop, angle: angleDeg([1, 0, 0], [0, 0, -1]), count: 2 },
-        { name: "補強材・前T字", kind: "T", type: tFront, angle: angleDeg([1, 0, 0], toBrace), count: 2 },
-        { name: "補強材・下T字", kind: "T", type: tLower, angle: angleDeg([0, 0, 1], scale(toBrace, -1)), count: 2 },
+        { name: "上部T字（支柱上）", kind: "T", type: tTop, angle: angleDeg([1, 0, 0], [0, 0, -1]), count: 2,
+          dirs: [[1, 0, 0], [-1, 0, 0], [0, 0, -1]] },
+        { name: "補強材・前T字", kind: "T", type: tFront, angle: angleDeg([1, 0, 0], toBrace), count: 2,
+          dirs: [[1, 0, 0], [-1, 0, 0], toBrace] },
+        { name: "補強材・下T字", kind: "T", type: tLower, angle: angleDeg([0, 0, 1], scale(toBrace, -1)), count: 2,
+          dirs: [[0, 0, 1], [0, 0, -1], scale(toBrace, -1)] },
       ];
       const fr = [S.frameOuterR, S.frameInnerR] as const;
       sideRecords = [
@@ -350,7 +363,8 @@ export function buildWheelchairFrame(v: WheelchairValues): WheelchairFrame | nul
   ];
   const jointRecords: JointRecord[] = [
     ...sideJoints,
-    { name: "後端L字エルボ", kind: "L", type: jointType(elbowAngle), angle: elbowAngle, count: 2 },
+    { name: "後端L字エルボ", kind: "L", type: jointType(elbowAngle), angle: elbowAngle, count: 2,
+      dirs: [[1, 0, 0], unit(sub(rears[1], rears[0]))] },
   ];
   for (const r of pipeRecords) if (r.cutLength <= 0) warnings.push(`パイプが短すぎます: ${r.name}`);
   const totalPipeLength = pipeRecords.reduce((a, r) => a + r.cutLength * r.count, 0);

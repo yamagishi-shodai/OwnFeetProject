@@ -11,7 +11,7 @@ import type { Keypoint3D } from "@/types";
 
 const fmt = (v: number) => v.toFixed(1);
 
-const METRIC_DEFS: { key: MetricKey; title: string; note: string; missing: string }[] = [
+export const METRIC_DEFS: { key: MetricKey; title: string; note: string; missing: string }[] = [
   {
     key: "frontHeight", title: "前足の高さ", note: "地面〜前足の付け根",
     missing: `${METRIC_LABELS.rightFrontBase}・${METRIC_LABELS.leftFrontBase}に点を配置してください`,

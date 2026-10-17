@@ -53,19 +53,19 @@ function DogsListContent() {
         </Link>
       </div>
 
-      <div className="flex gap-3">
+      <div className="flex flex-col sm:flex-row gap-3">
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="名前・犬種で絞り込み…"
-          className="flex-1 h-10 px-4 rounded-full border border-border-default bg-white text-sm
+          className="w-full sm:flex-1 min-w-0 h-10 px-4 rounded-full border border-border-default bg-white text-sm
             focus:outline-none focus:ring-2 focus:ring-accent-green/40"
         />
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
-          className="h-10 px-3 rounded-full border border-border-default bg-white text-sm text-ink-primary
+          className="w-full sm:w-auto h-10 px-3 rounded-full border border-border-default bg-white text-sm text-ink-primary
             focus:outline-none focus:ring-2 focus:ring-accent-green/40"
         >
           <option value="created_desc">登録日時（新しい順）</option>

@@ -266,7 +266,8 @@ function ViewSettingsPage() {
             )}
 
             {/* キャンバス */}
-            <div className="relative rounded-2xl overflow-hidden bg-warm-gutter" style={{ height: "min(74vh, 900px)" }}>
+            {/* スマホでは横長の写真に合わせて低めにする（縦に余白が出すぎないように） */}
+            <div className="relative rounded-2xl overflow-hidden bg-warm-gutter h-[75vw] sm:h-[min(74vh,900px)]">
               {activeView ? (
                 <ViewCanvas
                   view={activeView}
@@ -392,12 +393,13 @@ function ClickPrompt({ tone, step, title, sub, onBack, onSkip, action }: {
 }) {
   const navBtn = "shrink-0 px-3 py-2 rounded-xl text-xs font-bold bg-warm-sub text-ink-dark hover:bg-warm-main disabled:opacity-30 disabled:cursor-not-allowed";
   return (
-    <div className={`flex items-center justify-between gap-3 rounded-2xl bg-white px-3 py-2.5 border-2
+    // スマホでは案内を1行目に全幅で出し、「戻る」「スキップ」をその下の左右に置く
+    <div className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-2xl bg-white px-3 py-2.5 border-2
       ${PROMPT_BORDER[tone]}`}>
         <button type="button" onClick={onBack} disabled={!onBack} className={navBtn}>
           ← 戻る
         </button>
-        <div className="min-w-0 text-center">
+        <div className="order-first w-full sm:order-none sm:w-auto sm:flex-1 min-w-0 text-center">
           <p className="text-[11px] font-bold text-ink-muted">{step}</p>
           <p className="text-base sm:text-lg font-bold text-ink-dark leading-snug">{title}</p>
           {sub && <p className="text-[11px] text-ink-muted mt-0.5">{sub}</p>}

@@ -216,8 +216,7 @@ export function Karte({ dogId, session, onAddPhoto, onReplacePhoto, onNewSession
             adoptedMetrics={adoptedKeys}
             photos={overlayPhotos}
             selectedLabel=""
-            className="w-full"
-            style={{ height: "min(70vh, 640px)" }}
+            className="w-full h-[min(60vh,480px)] lg:h-[min(70vh,640px)]"
           />
           {hasMeasurement && (
             <BodyMetricsCard keypoints={keypoints} manual={manual} onChange={handleManualChange} saveError={manualError} />
@@ -245,8 +244,7 @@ export function Karte({ dogId, session, onAddPhoto, onReplacePhoto, onNewSession
             photos={overlayPhotos}
             wheelchair={wheelchair}
             selectedLabel=""
-            className="w-full"
-            style={{ height: "min(60vh, 520px)" }}
+            className="w-full h-[min(55vh,420px)] lg:h-[min(60vh,520px)]"
           />
         }
         saveError={wheelchairError}

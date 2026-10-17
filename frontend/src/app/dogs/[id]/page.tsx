@@ -57,8 +57,8 @@ function DogKartePage() {
     <div className="max-w-6xl mx-auto px-4 py-6 flex flex-col gap-6">
 
       {/* ── ヘッダー ────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
           <h1 className="text-xl font-bold text-ink-dark">{dog.name} のカルテ</h1>
           <p className="text-xs text-ink-muted mt-0.5">
             {session ? `採寸日: ${formatDate(session.created_at)}` : "まだ採寸がありません"}

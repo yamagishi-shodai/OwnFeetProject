@@ -25,11 +25,11 @@ export default function HomePage() {
           </p>
         </div>
         <MeasurementSteps />
-        <div className="flex gap-3">
-          <Link href="/sessions/new" className={linkButtonClass("primary")}>
+        <div className="flex flex-wrap gap-3">
+          <Link href="/sessions/new" className={linkButtonClass("primary", "md", "whitespace-nowrap")}>
             新しいカルテをつくる
           </Link>
-          <Link href="/dogs/new" className={linkButtonClass("secondary")}>
+          <Link href="/dogs/new" className={linkButtonClass("secondary", "md", "whitespace-nowrap")}>
             ペットを登録
           </Link>
         </div>

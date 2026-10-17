@@ -19,9 +19,9 @@ export function DogCard({ dog, onDelete }: Props) {
   }
 
   return (
-    <Card className="flex gap-4 items-center">
+    <Card className="flex gap-3 sm:gap-4 items-center">
       {/* サムネイル（横長） */}
-      <div className="w-36 aspect-[4/3] shrink-0 rounded-xl overflow-hidden bg-warm-gutter flex items-center justify-center">
+      <div className="w-24 sm:w-36 aspect-[4/3] shrink-0 rounded-xl overflow-hidden bg-warm-gutter flex items-center justify-center">
         {thumb ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -35,9 +35,10 @@ export function DogCard({ dog, onDelete }: Props) {
       </div>
 
       {/* コンテンツ */}
-      <div className="flex flex-col gap-3 flex-1">
-        <div className="flex items-start justify-between gap-4">
-          <div>
+      <div className="flex flex-col gap-3 flex-1 min-w-0">
+        {/* 狭い画面では名前の下にボタンを回り込ませる */}
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+          <div className="min-w-0">
             <p className="font-bold text-ink-dark">{dog.name}</p>
             <p className="text-xs text-ink-muted mt-0.5">
               {[dog.breed, dog.weight_kg ? `${dog.weight_kg} kg` : null]

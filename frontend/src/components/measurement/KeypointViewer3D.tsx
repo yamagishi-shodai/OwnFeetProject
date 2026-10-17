@@ -531,9 +531,12 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
         <>
           {/* 凡例 */}
           <div className="absolute top-3 left-3 flex flex-col gap-1 text-[11px] pointer-events-none">
-            <LegendItem color="#D16340" label="選択中" />
-            <LegendItem color="#3E6954" label="3軸確定" />
-            <LegendItem color="#cfaa55" label="一部確定" dim />
+            {/* 色の説明と軸ラベルは、スマホでは 3D が隠れないよう出さない */}
+            <div className="hidden sm:flex flex-col gap-1">
+              <LegendItem color="#D16340" label="選択中" />
+              <LegendItem color="#3E6954" label="3軸確定" />
+              <LegendItem color="#cfaa55" label="一部確定" dim />
+            </div>
             <button
               type="button"
               onClick={() => setShowLabels(v => !v)}
@@ -623,7 +626,7 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
           )}
 
           {/* 軸凡例 */}
-          <div className="absolute top-3 right-16 flex flex-col gap-0.5 text-[11px] pointer-events-none">
+          <div className="hidden sm:flex absolute top-3 right-16 flex-col gap-0.5 text-[11px] pointer-events-none">
             <span className="font-bold text-[#556E97]">X: 前後（体長）</span>
             <span className="font-bold text-[#3E6954]">Y: 左右（体幅）</span>
             <span className="font-bold text-[#D16340]">Z: 上下（高さ）</span>
@@ -640,7 +643,8 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
       )}
 
       {!hideControls && (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[11px] text-ink-muted pointer-events-none">
+        // 操作説明はマウス向けなので、スマホでは出さない
+        <div className="hidden sm:block absolute bottom-3 left-1/2 -translate-x-1/2 text-[11px] text-ink-muted pointer-events-none">
           ドラッグ: 回転 ／ スクロール: ズーム ／ 右ドラッグ: パン
         </div>
       )}

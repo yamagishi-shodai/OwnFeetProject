@@ -14,7 +14,7 @@ export function TopBarSearch() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="w-full max-w-sm">
+    <form onSubmit={handleSubmit} className="flex-1 min-w-0 max-w-sm">
       <input
         type="search"
         value={value}

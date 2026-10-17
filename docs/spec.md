@@ -472,8 +472,8 @@ Z- = 下
 | ビュー | px_axis | px_inverted | py_axis | py_inverted |
 |---|---|---|---|---|
 | top（真上） | x_cm | true | y_cm | false |
-| side_right（右側面） | x_cm | true | z_cm | true |
-| side_left（左側面） | x_cm | false | z_cm | true |
+| side_left（左側面） | x_cm | true | z_cm | true |
+| side_right（右側面） | x_cm | false | z_cm | true |
 | front（正面） | y_cm | false | z_cm | true |
 | back（背面） | y_cm | true | z_cm | true |
 

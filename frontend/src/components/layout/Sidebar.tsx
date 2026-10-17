@@ -49,18 +49,10 @@ const PetListIcon = () => (
   </Icon>
 );
 
-const HistoryIcon = () => (
-  <Icon>
-    <circle cx="12" cy="12" r="8.5" />
-    <path d="M12 7.5V12l3 2" />
-  </Icon>
-);
-
 const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "ホーム", icon: <HomeIcon /> },
   { href: "/sessions/new", label: "採寸開始", icon: <CameraIcon /> },
   { href: "/dogs", label: "登録済みペット", icon: <PetListIcon /> },
-  { href: "/sessions", label: "採寸履歴", icon: <HistoryIcon /> },
 ];
 
 export function Sidebar() {

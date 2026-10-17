@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Keypoint3D, SessionView, ViewClick } from "@/types";
 import { keypointStatus, VIEW_AXIS_MAP } from "@/lib/coords-3d";
 
@@ -13,13 +13,42 @@ type Props = {
   selectedLabel: string;
   calibPoints: CalibPoint[];    // キャリブレーション中の仮点 (0〜2個)
   onViewClick: (pixelX: number, pixelY: number, imgW: number, imgH: number) => void;
+  // 既存の点をドラッグして離したとき（画像ピクセル座標）
+  onKeypointMove: (label: string, pixelX: number, pixelY: number, imgW: number, imgH: number) => void;
+  onCalibPointMove: (index: number, pixelX: number, pixelY: number) => void;
+  // 既存の点をドラッグせずにクリックしたとき
+  onKeypointSelect: (label: string) => void;
 };
 
-export function ViewCanvas({ view, keypoints, clicks, selectedLabel, calibPoints, onViewClick }: Props) {
+// 既存の点をつかめる距離（canvas px）と、クリックとドラッグを区別する移動量
+const HIT_RADIUS = 14;
+const DRAG_THRESHOLD = 4;
+
+type DragTarget =
+  | { kind: "keypoint"; keypointId: string; label: string }
+  | { kind: "calib"; index: number };
+
+type DragState = {
+  target: DragTarget;
+  startX: number; startY: number;   // canvas px
+  moved: boolean;
+  pos: CalibPoint;                   // 画像ピクセル座標
+};
+
+export function ViewCanvas({
+  view, keypoints, clicks, selectedLabel, calibPoints,
+  onViewClick, onKeypointMove, onCalibPointMove, onKeypointSelect,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef    = useRef<HTMLImageElement | null>(null);
   const scaleRef  = useRef({ scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0, imgW: 1, imgH: 1 });
+  const [drag, setDrag] = useState<DragState | null>(null);
   const isCalibMode = !view.pixels_per_cm;
+
+  function pixelToCanvas(px: number, py: number) {
+    const { scaleX, scaleY, offsetX, offsetY } = scaleRef.current;
+    return { x: px * scaleX + offsetX, y: py * scaleY + offsetY };
+  }
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -60,7 +89,11 @@ export function ViewCanvas({ view, keypoints, clicks, selectedLabel, calibPoints
 
     // ── キャリブレーションモード ──────────────────────────────
     if (isCalibMode) {
-      const cps = calibPoints.map(p => pixelToCanvas(p.x, p.y));
+      const cps = calibPoints.map((p, i) =>
+        drag?.target.kind === "calib" && drag.target.index === i
+          ? pixelToCanvas(drag.pos.x, drag.pos.y)
+          : pixelToCanvas(p.x, p.y)
+      );
 
       // 2点間の線
       if (cps.length === 2) {
@@ -74,9 +107,8 @@ export function ViewCanvas({ view, keypoints, clicks, selectedLabel, calibPoints
         ctx.setLineDash([]);
 
         // ピクセル距離ラベル
-        const dx = calibPoints[1].x - calibPoints[0].x;
-        const dy = calibPoints[1].y - calibPoints[0].y;
-        const dist = Math.sqrt(dx * dx + dy * dy).toFixed(0);
+        const { scaleX } = scaleRef.current;
+        const dist = (Math.hypot(cps[1].x - cps[0].x, cps[1].y - cps[0].y) / scaleX).toFixed(0);
         const mx = (cps[0].x + cps[1].x) / 2;
         const my = (cps[0].y + cps[1].y) / 2;
         drawLabel(ctx, `${dist} px`, { x: mx + 8, y: my - 8 }, "#cfaa55");
@@ -88,18 +120,6 @@ export function ViewCanvas({ view, keypoints, clicks, selectedLabel, calibPoints
         drawLabel(ctx, i === 0 ? "点A" : "点B", { x: cp.x + 10, y: cp.y - 8 }, "#cfaa55");
       });
 
-      // ガイドメッセージ
-      ctx.save();
-      ctx.font = "bold 13px sans-serif";
-      ctx.fillStyle = "#cfaa55";
-      ctx.textAlign = "center";
-      const msg = calibPoints.length === 0
-        ? "スケール設定: ARマット上の点Aをクリック"
-        : calibPoints.length === 1
-        ? "次に点Bをクリック（既知の距離の2点目）"
-        : "下のパネルで距離を入力して確定してください";
-      ctx.fillText(msg, W / 2, H - 16);
-      ctx.restore();
       return; // キャリブレーション中はキーポイント描画しない
     }
 
@@ -110,7 +130,10 @@ export function ViewCanvas({ view, keypoints, clicks, selectedLabel, calibPoints
       const click = clicks.find(c => c.view_id === view.id && c.keypoint_3d_id === kp.id);
       if (!click) continue;
 
-      const cp = pixelToCanvas(click.pixel_x, click.pixel_y);
+      const isDragging = drag?.target.kind === "keypoint" && drag.target.keypointId === kp.id;
+      const cp = isDragging
+        ? pixelToCanvas(drag.pos.x, drag.pos.y)
+        : pixelToCanvas(click.pixel_x, click.pixel_y);
       const status = keypointStatus(kp);
       const isSelected = kp.label === selectedLabel;
       const color = isSelected ? "#D16340" : "#3E6954";
@@ -129,25 +152,7 @@ export function ViewCanvas({ view, keypoints, clicks, selectedLabel, calibPoints
         ctx.stroke();
       }
     }
-
-    const hasClick = keypoints.some(k =>
-      k.label === selectedLabel &&
-      clicks.some(c => c.view_id === view.id && c.keypoint_3d_id === k.id)
-    );
-    if (!hasClick) {
-      ctx.save();
-      ctx.font = "bold 12px sans-serif";
-      ctx.fillStyle = "#D16340";
-      ctx.textAlign = "center";
-      ctx.fillText(`「${selectedLabel}」の位置をクリック`, W / 2, H - 16);
-      ctx.restore();
-    }
-  }, [view, keypoints, clicks, selectedLabel, calibPoints, isCalibMode]);
-
-  function pixelToCanvas(px: number, py: number) {
-    const { scaleX, scaleY, offsetX, offsetY } = scaleRef.current;
-    return { x: px * scaleX + offsetX, y: py * scaleY + offsetY };
-  }
+  }, [view, keypoints, clicks, selectedLabel, calibPoints, isCalibMode, drag]);
 
   const drawRef = useRef(draw);
   useEffect(() => { drawRef.current = draw; }, [draw]);
@@ -168,26 +173,97 @@ export function ViewCanvas({ view, keypoints, clicks, selectedLabel, calibPoints
     return () => observer.disconnect();
   }, []);
 
-  function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    // キャリブ2点確定済みは受け付けない（確定ボタン待ち）
-    if (isCalibMode && calibPoints.length >= 2) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+  function eventToCanvas(e: React.PointerEvent<HTMLCanvasElement>) {
+    const canvas = e.currentTarget;
     const rect = canvas.getBoundingClientRect();
-    const canvasX = (e.clientX - rect.left) * (canvas.width / rect.width);
-    const canvasY = (e.clientY - rect.top)  * (canvas.height / rect.height);
-    const { scaleX, scaleY, offsetX, offsetY, imgW, imgH } = scaleRef.current;
-    const pixelX = (canvasX - offsetX) / scaleX;
-    const pixelY = (canvasY - offsetY) / scaleY;
-    if (pixelX < 0 || pixelX > imgW || pixelY < 0 || pixelY > imgH) return;
-    onViewClick(pixelX, pixelY, imgW, imgH);
+    return {
+      x: (e.clientX - rect.left) * (canvas.width / rect.width),
+      y: (e.clientY - rect.top)  * (canvas.height / rect.height),
+    };
+  }
+
+  function canvasToPixel(c: { x: number; y: number }) {
+    const { scaleX, scaleY, offsetX, offsetY } = scaleRef.current;
+    return { x: (c.x - offsetX) / scaleX, y: (c.y - offsetY) / scaleY };
+  }
+
+  // canvas 座標の近くにある既存の点（最も近いもの）
+  function hitTest(c: { x: number; y: number }): { target: DragTarget; pos: CalibPoint } | null {
+    let best: { target: DragTarget; pos: CalibPoint; d: number } | null = null;
+    const consider = (target: DragTarget, pos: CalibPoint) => {
+      const cp = pixelToCanvas(pos.x, pos.y);
+      const d = Math.hypot(cp.x - c.x, cp.y - c.y);
+      if (d <= HIT_RADIUS && (!best || d < best.d)) best = { target, pos, d };
+    };
+    if (isCalibMode) {
+      calibPoints.forEach((p, index) => consider({ kind: "calib", index }, p));
+    } else {
+      for (const kp of keypoints) {
+        const click = clicks.find(c => c.view_id === view.id && c.keypoint_3d_id === kp.id);
+        if (click) consider({ kind: "keypoint", keypointId: kp.id, label: kp.label }, { x: click.pixel_x, y: click.pixel_y });
+      }
+    }
+    return best;
+  }
+
+  function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!imgRef.current) return;
+    const c = eventToCanvas(e);
+
+    // 既存の点をつかんだらドラッグ開始
+    const hit = hitTest(c);
+    if (hit) {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setDrag({ target: hit.target, startX: c.x, startY: c.y, moved: false, pos: hit.pos });
+      return;
+    }
+
+    // キャリブ2点確定済みは新しい点を受け付けない（確定ボタン待ち）
+    if (isCalibMode && calibPoints.length >= 2) return;
+    const { imgW, imgH } = scaleRef.current;
+    const p = canvasToPixel(c);
+    if (p.x < 0 || p.x > imgW || p.y < 0 || p.y > imgH) return;
+    onViewClick(p.x, p.y, imgW, imgH);
+  }
+
+  function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
+    const c = eventToCanvas(e);
+    if (!drag) {
+      e.currentTarget.style.cursor = hitTest(c) ? "grab" : "crosshair";
+      return;
+    }
+    const { imgW, imgH } = scaleRef.current;
+    const p = canvasToPixel(c);
+    const moved = drag.moved || Math.hypot(c.x - drag.startX, c.y - drag.startY) > DRAG_THRESHOLD;
+    setDrag({
+      ...drag,
+      moved,
+      pos: { x: Math.min(Math.max(p.x, 0), imgW), y: Math.min(Math.max(p.y, 0), imgH) },
+    });
+  }
+
+  function handlePointerUp() {
+    if (!drag) return;
+    const { imgW, imgH } = scaleRef.current;
+    const { target, moved, pos } = drag;
+    setDrag(null);
+    if (target.kind === "keypoint") {
+      if (moved) onKeypointMove(target.label, pos.x, pos.y, imgW, imgH);
+      else onKeypointSelect(target.label);
+    } else if (moved) {
+      onCalibPointMove(target.index, pos.x, pos.y);
+    }
   }
 
   return (
     <canvas
       ref={canvasRef}
-      className="w-full h-full rounded-2xl cursor-crosshair"
+      className="w-full h-full rounded-2xl touch-none"
+      style={{ cursor: drag ? "grabbing" : "crosshair" }}
       onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={() => setDrag(null)}
     />
   );
 }

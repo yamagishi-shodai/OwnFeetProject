@@ -13,7 +13,7 @@ export function DogCard({ dog, onDelete }: Props) {
 
   function handleDelete() {
     const ok = window.confirm(
-      `「${dog.name}」を削除しますか？\n採寸セッション ${dog.sessionCount} 件もすべて削除され、元に戻せません。`
+      `「${dog.name}」を削除しますか？\nカルテ ${dog.sessionCount} 件もすべて削除され、元に戻せません。`
     );
     if (ok) onDelete?.(dog.id);
   }
@@ -45,41 +45,28 @@ export function DogCard({ dog, onDelete }: Props) {
                 .join(" · ") || "—"}
             </p>
           </div>
-          <div className="flex gap-2 shrink-0">
-            <Link href={`/dogs/${dog.id}`} className={linkButtonClass("secondary", "sm")}>
-              詳細
+          <div className="flex items-center gap-3 shrink-0">
+            <Link href={`/dogs/${dog.id}`} className={linkButtonClass("primary", "sm")}>
+              カルテを開く
             </Link>
-            <Link href={`/sessions/new?dog_id=${dog.id}`} className={linkButtonClass("primary", "sm")}>
-              ＋ 新しい採寸
-            </Link>
+            {onDelete && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="text-xs text-accent-red hover:underline"
+              >
+                削除
+              </button>
+            )}
           </div>
         </div>
 
-        {/* セッション履歴サマリー */}
+        {/* カルテのサマリー */}
         {dog.sessionCount > 0 && dog.latestSession && (
-          <div className="flex items-center justify-between pt-2 border-t border-border-light">
-            <p className="text-xs text-ink-muted">
-              採寸 {dog.sessionCount} 回 · 最新:{" "}
-              {new Date(dog.latestSession.created_at).toLocaleDateString("ja-JP")}
-              {dog.latestSession.pixels_per_cm ? "" : " · スケール未設定"}
-            </p>
-            <Link
-              href={`/sessions/${dog.latestSession.id}/3d`}
-              className={linkButtonClass("secondary", "sm")}
-            >
-              続きから
-            </Link>
-          </div>
-        )}
-
-        {onDelete && (
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="text-xs text-accent-red hover:underline self-end"
-          >
-            削除
-          </button>
+          <p className="pt-2 border-t border-border-light text-xs text-ink-muted">
+            カルテ {dog.sessionCount} 件 · 最新:{" "}
+            {new Date(dog.latestSession.created_at).toLocaleDateString("ja-JP")}
+          </p>
         )}
       </div>
     </Card>

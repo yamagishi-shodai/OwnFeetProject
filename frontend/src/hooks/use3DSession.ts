@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useReducer, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pixelToWorld, merge3DPoint, VIEW_AXIS_MAP } from "@/lib/coords-3d";
-import { uploadSessionView } from "@/lib/session-views";
 import type {
   SessionView, Keypoint3D, Keypoint3DInsert,
   ViewClick, ViewType,
@@ -18,6 +17,7 @@ type State = {
   activeViewId: string | null;
   selectedLabel: string;
   dogId: string | null;
+  createdAt: string | null;
   matWidthCm: number;
   matHeightCm: number;
   loading: boolean;
@@ -30,6 +30,7 @@ const INITIAL: State = {
   activeViewId: null,
   selectedLabel: "右肩",
   dogId: null,
+  createdAt: null,
   matWidthCm: 0,
   matHeightCm: 0,
   loading: true, saving: false, error: null,
@@ -38,10 +39,9 @@ const INITIAL: State = {
 // ── Actions ────────────────────────────────────────────────────
 
 type Action =
-  | { type: "LOADED"; views: SessionView[]; keypoints: Keypoint3D[]; clicks: ViewClick[]; dogId: string | null; matWidthCm: number; matHeightCm: number }
+  | { type: "LOADED"; views: SessionView[]; keypoints: Keypoint3D[]; clicks: ViewClick[]; dogId: string | null; createdAt: string | null; matWidthCm: number; matHeightCm: number; initialViewType?: ViewType }
   | { type: "SET_ACTIVE_VIEW"; viewId: string }
   | { type: "SET_LABEL"; label: string }
-  | { type: "VIEW_ADDED"; view: SessionView }
   | { type: "VIEW_CALIBRATED"; view: SessionView }
   | { type: "KEYPOINT_UPSERTED"; keypoint: Keypoint3D }
   | { type: "CLICK_ADDED"; click: ViewClick }
@@ -55,13 +55,12 @@ function reducer(s: State, a: Action): State {
   switch (a.type) {
     case "LOADED":
       return { ...s, views: a.views, keypoints: a.keypoints, clicks: a.clicks,
-               dogId: a.dogId, matWidthCm: a.matWidthCm, matHeightCm: a.matHeightCm,
-               activeViewId: a.views[0]?.id ?? null, loading: false };
+               dogId: a.dogId, createdAt: a.createdAt, matWidthCm: a.matWidthCm, matHeightCm: a.matHeightCm,
+               // 指定ビュー（同種が複数なら新しいもの）→ なければ最初のビュー
+               activeViewId: ([...a.views].reverse().find(v => v.view_type === a.initialViewType) ?? a.views[0])?.id ?? null,
+               loading: false };
     case "SET_ACTIVE_VIEW": return { ...s, activeViewId: a.viewId };
     case "SET_LABEL":       return { ...s, selectedLabel: a.label };
-    case "VIEW_ADDED":
-      return { ...s, views: [...s.views, a.view],
-               activeViewId: s.activeViewId ?? a.view.id, saving: false };
     case "VIEW_CALIBRATED":
       return { ...s, saving: false,
                views: s.views.map(v => v.id === a.view.id ? a.view : v) };
@@ -86,41 +85,34 @@ function reducer(s: State, a: Action): State {
 
 // ── Hook ───────────────────────────────────────────────────────
 
-export function use3DSession(sessionId: string) {
+export function use3DSession(sessionId: string, initialViewType?: ViewType) {
   const [state, dispatch] = useReducer(reducer, INITIAL);
   const [savedFlash, setSavedFlash] = useState(false);
 
   useEffect(() => {
     async function load() {
       const [{ data: session }, { data: views }, { data: keypoints }, { data: clicks }] = await Promise.all([
-        supabase.from("measurement_sessions").select("dog_id, mat_width_cm, mat_height_cm").eq("id", sessionId).single(),
+        supabase.from("measurement_sessions").select("dog_id, mat_width_cm, mat_height_cm, created_at").eq("id", sessionId).single(),
         supabase.from("session_views").select("*").eq("session_id", sessionId).order("created_at"),
         supabase.from("keypoints_3d").select("*").eq("session_id", sessionId).order("created_at"),
         supabase.from("view_clicks").select("*, keypoints_3d!inner(session_id)").eq("keypoints_3d.session_id", sessionId),
       ]);
       dispatch({
         type: "LOADED",
+        initialViewType,
         views: views ?? [],
         keypoints: keypoints ?? [],
         clicks: clicks ?? [],
         dogId: session?.dog_id ?? null,
+        createdAt: session?.created_at ?? null,
         matWidthCm: session?.mat_width_cm ?? 0,
         matHeightCm: session?.mat_height_cm ?? 0,
       });
     }
     load();
-  }, [sessionId]);
+  }, [sessionId, initialViewType]);
 
   // ── ビュー追加（画像アップロード） ──────────────────────────
-  const addView = useCallback(async (viewType: ViewType, file: File) => {
-    dispatch({ type: "SAVING" });
-    const { view, error } = await uploadSessionView(sessionId, viewType, file);
-    if (error || !view) {
-      dispatch({ type: "ERROR", message: error ?? "アップロード失敗" }); return;
-    }
-    dispatch({ type: "VIEW_ADDED", view });
-  }, [sessionId]);
-
   // ── キャリブレーション ────────────────────────────────────
   const calibrateView = useCallback(async (
     viewId: string, pixelDist: number, knownCm: number
@@ -146,7 +138,8 @@ export function use3DSession(sessionId: string) {
   const placeClick = useCallback(async (
     viewId: string, pixelX: number, pixelY: number,
     imgW: number, imgH: number,
-    axisFlip?: { px_inverted?: boolean; py_inverted?: boolean }
+    axisFlip?: { px_inverted?: boolean; py_inverted?: boolean },
+    label: string = state.selectedLabel,   // 省略時は選択中の部位
   ) => {
     const view = state.views.find(v => v.id === viewId);
     if (!view?.pixels_per_cm) {
@@ -159,7 +152,7 @@ export function use3DSession(sessionId: string) {
       ? { ...baseMap, ...axisFlip }
       : undefined;
     const partial = pixelToWorld(pixelX, pixelY, view.view_type, view.pixels_per_cm!, imgW, imgH, mapOverride);
-    const existing = state.keypoints.find(k => k.label === state.selectedLabel);
+    const existing = state.keypoints.find(k => k.label === label);
 
     let keypoint: Keypoint3D;
     if (existing) {
@@ -170,7 +163,7 @@ export function use3DSession(sessionId: string) {
       keypoint = data;
     } else {
       const insert: Keypoint3DInsert = {
-        session_id: sessionId, label: state.selectedLabel,
+        session_id: sessionId, label,
         x_cm: partial.x_cm ?? null, y_cm: partial.y_cm ?? null, z_cm: partial.z_cm ?? null,
       };
       const { data, error } = await supabase
@@ -213,7 +206,6 @@ export function use3DSession(sessionId: string) {
   return {
     ...state,
     savedFlash,
-    addView,
     calibrateView,
     resetScale,
     placeClick,

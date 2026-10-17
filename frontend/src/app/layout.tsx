@@ -14,7 +14,7 @@ const mPlusRounded = M_PLUS_Rounded_1c({
 
 export const metadata: Metadata = {
   title: "犬用車椅子採寸プラットフォーム",
-  description: "専用採寸マットと画像解析による犬の採寸・車椅子適合評価",
+  description: "基準物と画像解析による犬の採寸・車椅子適合評価",
 };
 
 export default function RootLayout({

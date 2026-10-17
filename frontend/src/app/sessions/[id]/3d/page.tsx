@@ -1,28 +1,29 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useState, useEffect } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { use3DSession } from "@/hooks/use3DSession";
 import { ViewCanvas, type CalibPoint } from "@/components/measurement/ViewCanvas";
 import { Keypoint3DList, PRESET_LABELS } from "@/components/measurement/Keypoint3DList";
-import { ViewUploader } from "@/components/measurement/ViewUploader";
-import { DogInfoForm } from "@/components/dogs/DogInfoForm";
 import { VIEW_LABELS } from "@/types";
-import type { ViewType, Keypoint3D, SessionView } from "@/types";
+import type { ViewType } from "@/types";
 
-const KeypointViewer3D = dynamic(
-  () => import("@/components/measurement/KeypointViewer3D").then(m => ({ default: m.KeypointViewer3D })),
-  { ssr: false, loading: () => <div className="w-full h-full flex items-center justify-center text-sm text-ink-muted">3Dビューを読み込み中…</div> }
-);
+const VIEW_ORDER: ViewType[] = ["side_left", "top"];
 
-const VIEW_ORDER: ViewType[] = ["side_right", "top"];
-type PanelMode = "place" | "view3d";
+export default function Page() {
+  return (
+    <Suspense fallback={<p className="p-8 text-sm text-ink-muted">読み込み中…</p>}>
+      <ViewSettingsPage />
+    </Suspense>
+  );
+}
 
-export default function ThreeDPage() {
+// カルテの写真から開く設定ページ: スケール設定 → 点の配置 → 決定でカルテへ戻る
+function ViewSettingsPage() {
   const { id } = useParams<{ id: string }>();
-  const [panelMode, setPanelMode] = useState<PanelMode>("place");
+  const router = useRouter();
+  const initialView = useSearchParams().get("view") as ViewType | null;
   const [calibPoints, setCalibPoints] = useState<CalibPoint[]>([]);
   const [knownCm, setKnownCm] = useState<number | null>(null);
   // 真上ビューの犬の向き: "left"=頭が画像左(デフォルト), "right"=頭が画像右
@@ -31,9 +32,13 @@ export default function ThreeDPage() {
   const {
     views, keypoints, clicks, activeView,
     selectedLabel, dogId, matWidthCm, loading, saving, error, savedFlash,
-    addView, calibrateView, resetScale, placeClick, deleteKeypoint,
+    calibrateView, resetScale, placeClick, deleteKeypoint,
     setActiveView, setLabel,
-  } = use3DSession(id);
+  } = use3DSession(id, initialView ?? undefined);
+
+  const karteHref = dogId ? `/dogs/${dogId}?session=${id}` : "/dogs";
+  // 同じビューが複数ある（撮り直し）場合は新しいものを使う（カルテと揃える）
+  const latestView = (vt: ViewType) => [...views].reverse().find(v => v.view_type === vt && v.image_url);
 
   // ビューが変わったらキャリブ点をリセット
   useEffect(() => {
@@ -58,19 +63,61 @@ export default function ThreeDPage() {
       // キャリブレーションモード: 2点を蓄積
       setCalibPoints(prev => prev.length < 2 ? [...prev, { x: pixelX, y: pixelY }] : prev);
     } else {
-      // キーポイント配置モード（向き設定を反映）
-      const axisFlip = (activeView.view_type === "top" && topHeadDir === "right")
-        ? { px_inverted: false }
-        : undefined;
-      placeClick(activeView.id, pixelX, pixelY, imgW, imgH, axisFlip);
-
-      // 次の部位ラベルへ自動で進む
-      const allLabels = [...PRESET_LABELS, ...keypoints.map(k => k.label).filter(l => !PRESET_LABELS.includes(l))];
-      const idx = allLabels.indexOf(selectedLabel);
-      if (idx >= 0 && idx < allLabels.length - 1) {
-        setLabel(allLabels[idx + 1]);
-      }
+      placeClick(activeView.id, pixelX, pixelY, imgW, imgH, topAxisFlip());
+      goNextLabel(); // 次の部位ラベルへ自動で進む
     }
+  }
+
+  // 真上ビューで頭が右向きのときは X 軸を反転しない
+  function topAxisFlip() {
+    return activeView?.view_type === "top" && topHeadDir === "right"
+      ? { px_inverted: false }
+      : undefined;
+  }
+
+  // 既存の点をドラッグで移動（選択中の部位や自動送りは変えない）
+  function handleKeypointMove(label: string, pixelX: number, pixelY: number, imgW: number, imgH: number) {
+    if (!activeView?.pixels_per_cm) return;
+    placeClick(activeView.id, pixelX, pixelY, imgW, imgH, topAxisFlip(), label);
+  }
+
+  function handleCalibPointMove(index: number, pixelX: number, pixelY: number) {
+    setCalibPoints(prev => prev.map((p, i) => i === index ? { x: pixelX, y: pixelY } : p));
+  }
+
+  // 部位の順番（プリセット → 独自ラベル）
+  const allLabels = [...PRESET_LABELS, ...keypoints.map(k => k.label).filter(l => !PRESET_LABELS.includes(l))];
+  const labelIdx = allLabels.indexOf(selectedLabel);
+
+  function goPrevLabel() {
+    if (labelIdx > 0) setLabel(allLabels[labelIdx - 1]);
+  }
+
+  function goNextLabel() {
+    if (labelIdx >= 0 && labelIdx < allLabels.length - 1) setLabel(allLabels[labelIdx + 1]);
+  }
+
+  const placedInView = (label: string) => !!activeView && keypoints.some(k =>
+    k.label === label &&
+    clicks.some(c => c.view_id === activeView.id && c.keypoint_3d_id === k.id)
+  );
+  const selectedPlacedInView = placedInView(selectedLabel);
+  // 全部位を置いた、または最後の部位まで置き終わった（見えない部位はスキップされうる）
+  const allPlacedInView = allLabels.every(placedInView)
+    || (labelIdx === allLabels.length - 1 && selectedPlacedInView);
+
+  // ── ビューの決定 → 次のビュー（撮影済みなら）か、カルテへ戻る ──────────
+  const activeOrder = activeView ? VIEW_ORDER.indexOf(activeView.view_type) : -1;
+  const nextViewType: ViewType | undefined = activeOrder >= 0 ? VIEW_ORDER[activeOrder + 1] : undefined;
+  const nextView = nextViewType ? latestView(nextViewType) : undefined;
+  const decideLabel = activeView
+    ? `${VIEW_LABELS[activeView.view_type]}を決定 → ${nextView && nextViewType ? VIEW_LABELS[nextViewType] + "へ" : "カルテに戻る"}`
+    : "";
+
+  function handleDecideView() {
+    setLabel(allLabels[0]);
+    if (nextView) setActiveView(nextView.id);
+    else router.push(karteHref);
   }
 
   async function handleCalibConfirm() {
@@ -90,14 +137,15 @@ export default function ThreeDPage() {
 
   return (
     <div className="max-w-[1600px] mx-auto px-4 py-6 flex flex-col gap-4">
-
       {/* ── ヘッダー ──────────────────────────────── */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
-          <Link href="/" className="text-xs text-ink-muted hover:text-ink-primary">
-            ← 犬一覧
+          <Link href={karteHref} className="text-xs text-ink-muted hover:text-ink-primary">
+            ← カルテに戻る
           </Link>
-          <h1 className="text-lg font-bold text-ink-primary">3D採寸</h1>
+          <h1 className="text-lg font-bold text-ink-primary">
+            {activeView ? `${VIEW_LABELS[activeView.view_type]}の点を設定` : "点の設定"}
+          </h1>
           {savedFlash && (
             <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-accent-green text-white animate-pulse">
               保存済み
@@ -110,29 +158,6 @@ export default function ThreeDPage() {
           )}
         </div>
 
-        <div className="flex rounded-xl overflow-hidden border border-border-default">
-          <button
-            onClick={() => setPanelMode("place")}
-            className={`px-4 py-2 text-xs font-bold transition-colors
-              ${panelMode === "place" ? "bg-ink-primary text-white" : "bg-warm-card text-ink-muted hover:bg-warm-sub"}`}
-          >
-            点を配置
-          </button>
-          <button
-            onClick={() => setPanelMode("view3d")}
-            className={`px-4 py-2 text-xs font-bold transition-colors flex items-center gap-1.5
-              ${panelMode === "view3d" ? "bg-ink-primary text-white" : "bg-warm-card text-ink-muted hover:bg-warm-sub"}`}
-          >
-            3Dビュー
-            {confirmedCount > 0 && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold
-                ${panelMode === "view3d" ? "bg-white/20" : "bg-accent-green/20 text-accent-green"}`}>
-                {confirmedCount}
-              </span>
-            )}
-          </button>
-        </div>
-
         <span className="text-xs text-ink-muted">
           {confirmedCount} / {keypoints.length} ポイント確定
         </span>
@@ -142,19 +167,7 @@ export default function ThreeDPage() {
         <div className="px-4 py-3 rounded-xl bg-accent-red/10 text-sm text-accent-red">{error}</div>
       )}
 
-      {/* ── 3Dビューモード ─────────────────────────── */}
-      {panelMode === "view3d" && (
-        <View3DPanel
-          keypoints={keypoints}
-          selectedLabel={selectedLabel}
-          views={views}
-          onSelectLabel={setLabel}
-          onDelete={deleteKeypoint}
-        />
-      )}
-
-      {/* ── 配置モード ─────────────────────────────── */}
-      {panelMode === "place" && (
+      {/* ── 配置 ─────────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4">
 
           {/* 左: ビュー切り替え + キャンバス */}
@@ -162,7 +175,7 @@ export default function ThreeDPage() {
             {/* ビュータブ */}
             <div className="flex gap-1.5 flex-wrap">
               {VIEW_ORDER.map(vt => {
-                const v = views.find(v => v.view_type === vt);
+                const v = latestView(vt);
                 const isActive = activeView?.view_type === vt;
                 return (
                   <button
@@ -182,6 +195,15 @@ export default function ThreeDPage() {
                   </button>
                 );
               })}
+              {activeView?.pixels_per_cm && (
+                <button
+                  onClick={() => resetScale(activeView.id)}
+                  disabled={saving}
+                  className="ml-auto px-3 py-1.5 rounded-xl text-xs font-bold text-accent-red hover:bg-accent-red/10 disabled:opacity-40"
+                >
+                  スケールを再設定
+                </button>
+              )}
             </div>
 
             {/* 真上ビューの向き設定 */}
@@ -203,6 +225,35 @@ export default function ThreeDPage() {
               </div>
             )}
 
+            {/* 次にクリックする場所の案内 */}
+            {activeView && isCalibMode && (
+              <ClickPrompt
+                tone="calib"
+                step={`スケール ${Math.min(calibPoints.length + 1, 2)} / 2`}
+                title={
+                  calibPoints.length === 0 ? <>基準物の<Em tone="calib">一端（点A）</Em>をクリック</>
+                  : calibPoints.length === 1 ? <>基準物の<Em tone="calib">もう一端（点B）</Em>をクリック</>
+                  : <>下のパネルで<Em tone="calib">長さ</Em>を入力して確定</>
+                }
+                onBack={calibPoints.length > 0 ? () => setCalibPoints(prev => prev.slice(0, -1)) : undefined}
+              />
+            )}
+            {activeView && !isCalibMode && labelIdx >= 0 && (
+              <ClickPrompt
+                tone={allPlacedInView ? "done" : "keypoint"}
+                step={allPlacedInView ? "すべて配置済み" : `${labelIdx + 1} / ${allLabels.length}`}
+                title={allPlacedInView
+                  ? <>クリックし直すと位置を修正できます</>
+                  : <><Em tone="keypoint">{selectedLabel}</Em>の位置をクリック</>}
+                sub={allPlacedInView
+                  ? `選択中: ${selectedLabel} ・ 点はドラッグでも移動できます`
+                  : selectedPlacedInView ? "配置済み — 点をドラッグするか、クリックし直すと位置を修正できます" : undefined}
+                onBack={labelIdx > 0 ? goPrevLabel : undefined}
+                onSkip={labelIdx < allLabels.length - 1 ? goNextLabel : undefined}
+                action={allPlacedInView ? { label: decideLabel, onClick: handleDecideView, disabled: saving } : undefined}
+              />
+            )}
+
             {/* キャンバス */}
             <div className="relative rounded-2xl overflow-hidden bg-warm-gutter" style={{ height: "min(74vh, 900px)" }}>
               {activeView ? (
@@ -213,10 +264,13 @@ export default function ThreeDPage() {
                   selectedLabel={selectedLabel}
                   calibPoints={calibPoints}
                   onViewClick={handleCanvasClick}
+                  onKeypointMove={handleKeypointMove}
+                  onCalibPointMove={handleCalibPointMove}
+                  onKeypointSelect={setLabel}
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-sm text-ink-muted">
-                  右パネルから画像をアップロードしてください
+                  カルテから画像を撮影してください
                 </div>
               )}
 
@@ -260,15 +314,15 @@ export default function ThreeDPage() {
               {isCalibMode ? (
                 <>
                   <p className="font-bold text-accent-yellow">スケール設定モード</p>
-                  <p>ARマット上の2点をクリック → 距離を入力 → 確定</p>
+                  <p>基準物の両端2点をクリック → 長さを入力 → 確定</p>
                   <p>設定後、自動的にキーポイント配置モードに切り替わります</p>
                 </>
               ) : (
                 <>
                   <p>① 部位を選択 → 画像上をクリックで点を配置</p>
-                  <p>② 右側面ビュー → X(体長)・Z(高さ) 確定</p>
+                  <p>② 左側面ビュー → X(体長)・Z(高さ) 確定</p>
                   <p>③ 真上ビュー → X(体長)・Y(体幅) 確定</p>
-                  <p>④ 「3Dビュー」タブで確認・回転・ズーム</p>
+                  <p>④ 「決定」でカルテに戻ると、3Dビューに反映されます</p>
                 </>
               )}
             </div>
@@ -277,132 +331,79 @@ export default function ThreeDPage() {
           {/* 右パネル */}
           <div className="flex flex-col gap-4 overflow-y-auto pr-1" style={{ maxHeight: "min(74vh, 900px)" }}>
 
-            {/* 犬の情報 */}
-            {dogId && (
-              <section>
-                <p className="text-xs font-bold text-ink-muted mb-2">犬の情報</p>
-                <div className="rounded-2xl bg-warm-card border border-border-default p-3">
-                  <DogInfoForm dogId={dogId} />
-                </div>
-              </section>
-            )}
-
+            {/* スケール未設定（初回）でも部位を先に選んでおける */}
             <section>
-              <p className="text-xs font-bold text-ink-muted mb-2">ビュー管理</p>
-              <div className="flex flex-col gap-2">
-                {VIEW_ORDER.map(vt => {
-                  const v = views.find(v => v.view_type === vt);
-                  return (
-                    <ViewUploader
-                      key={vt}
-                      viewType={vt}
-                      existingView={v}
-                      onUpload={addView}
-                      onResetScale={resetScale}
-                      saving={saving}
-                    />
-                  );
-                })}
-              </div>
+              {isCalibMode && (
+                <p className="text-[11px] text-accent-yellow font-bold mb-2">
+                  スケール設定後、選んだ部位から配置を始めます
+                </p>
+              )}
+              <Keypoint3DList
+                keypoints={keypoints}
+                selectedLabel={selectedLabel}
+                onSelectLabel={setLabel}
+                onDelete={deleteKeypoint}
+              />
             </section>
-
-            {!isCalibMode && (
-              <section>
-                <Keypoint3DList
-                  keypoints={keypoints}
-                  selectedLabel={selectedLabel}
-                  onSelectLabel={setLabel}
-                  onDelete={deleteKeypoint}
-                />
-              </section>
-            )}
           </div>
         </div>
-      )}
     </div>
   );
 }
 
-// ── 3Dビュー + 写真パネル ───────────────────────────────────────
-function View3DPanel({
-  keypoints, selectedLabel, views, onSelectLabel, onDelete,
-}: {
-  keypoints: Keypoint3D[];
-  selectedLabel: string;
-  views: SessionView[];
-  onSelectLabel: (l: string) => void;
-  onDelete: (id: string) => void;
-}) {
-  const [visible, setVisible] = useState<Record<string, boolean>>({ top: true, side_right: true });
+// ── クリック案内バナー ──────────────────────────────────────────
+type PromptTone = "calib" | "keypoint" | "done";
 
-  const toggle = (vt: string) => setVisible(prev => ({ ...prev, [vt]: !prev[vt] }));
+const PROMPT_BORDER: Record<PromptTone, string> = {
+  calib:    "border-accent-yellow",
+  keypoint: "border-accent-red",
+  done:     "border-accent-green",
+};
 
-  const photoViews = (["side_right", "top"] as const)
-    .map(vt => ({ vt, view: views.find(v => v.view_type === vt) }))
-    .filter(({ view }) => view?.image_url);
-
+function Em({ tone, children }: { tone: PromptTone; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-3">
-      {/* 写真の表示/非表示トグル */}
-      {photoViews.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-ink-muted">写真:</span>
-          {photoViews.map(({ vt, view }) => (
+    <span className={`mx-1 px-2.5 py-0.5 rounded-lg text-white ${tone === "calib" ? "bg-accent-yellow" : "bg-accent-red"}`}>
+      {children}
+    </span>
+  );
+}
+
+function ClickPrompt({ tone, step, title, sub, onBack, onSkip, action }: {
+  tone: PromptTone;
+  step: string;
+  title: React.ReactNode;
+  sub?: string;
+  onBack?: () => void;
+  onSkip?: () => void;
+  action?: { label: string; onClick: () => void; disabled?: boolean };
+}) {
+  const navBtn = "shrink-0 px-3 py-2 rounded-xl text-xs font-bold bg-warm-sub text-ink-dark hover:bg-warm-main disabled:opacity-30 disabled:cursor-not-allowed";
+  return (
+    <div className={`flex items-center justify-between gap-3 rounded-2xl bg-white px-3 py-2.5 border-2
+      ${PROMPT_BORDER[tone]}`}>
+        <button type="button" onClick={onBack} disabled={!onBack} className={navBtn}>
+          ← 戻る
+        </button>
+        <div className="min-w-0 text-center">
+          <p className="text-[11px] font-bold text-ink-muted">{step}</p>
+          <p className="text-base sm:text-lg font-bold text-ink-dark leading-snug">{title}</p>
+          {sub && <p className="text-[11px] text-ink-muted mt-0.5">{sub}</p>}
+          {action && (
             <button
-              key={vt}
-              onClick={() => toggle(vt)}
-              className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors
-                ${visible[vt]
-                  ? "bg-ink-primary text-white border-ink-primary"
-                  : "bg-warm-card text-ink-muted border-border-default hover:bg-warm-sub"
-                }`}
+              type="button"
+              onClick={action.onClick}
+              disabled={action.disabled}
+              className="mt-2 px-5 py-2 rounded-full bg-accent-green text-white text-sm font-bold shadow-sm hover:opacity-90 disabled:opacity-40"
             >
-              {VIEW_LABELS[vt]} {visible[vt] ? "非表示" : "表示"}
+              {action.label}
             </button>
-          ))}
+          )}
         </div>
-      )}
-
-      {/* メインレイアウト: 3D + 写真パネル */}
-      <div className={`grid gap-3 ${photoViews.some(({ vt }) => visible[vt]) ? "lg:grid-cols-[1fr_260px]" : ""}`}>
-        {/* 3Dビューアー */}
-        <KeypointViewer3D
-          keypoints={keypoints}
-          selectedLabel={selectedLabel}
-          className="w-full"
-          style={{ height: "min(78vh, 900px)" }}
-        />
-
-        {/* 写真パネル（表示中のものだけ） */}
-        {photoViews.some(({ vt }) => visible[vt]) && (
-          <div className="flex flex-col gap-3">
-            {photoViews.map(({ vt, view }) =>
-              visible[vt] && view?.image_url ? (
-                <div key={vt} className="flex flex-col gap-1">
-                  <p className="text-xs font-bold text-ink-muted px-1">{VIEW_LABELS[vt]}</p>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={view.image_url}
-                    alt={VIEW_LABELS[vt]}
-                    className="w-full rounded-2xl object-contain bg-warm-gutter"
-                    style={{ maxHeight: 260 }}
-                  />
-                </div>
-              ) : null
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* キーポイントリスト */}
-      <div className="rounded-2xl bg-warm-card border border-border-default p-4">
-        <Keypoint3DList
-          keypoints={keypoints}
-          selectedLabel={selectedLabel}
-          onSelectLabel={onSelectLabel}
-          onDelete={onDelete}
-        />
-      </div>
+        {tone !== "calib" ? (
+          <button type="button" onClick={onSkip} disabled={!onSkip} className={navBtn}>
+            スキップ →
+          </button>
+        ) : <span className="w-[72px] shrink-0" />}
     </div>
   );
 }

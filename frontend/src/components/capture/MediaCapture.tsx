@@ -5,12 +5,20 @@ import { FrameScrubber } from "./FrameScrubber";
 
 type Mode = "live" | "scrub";
 
+export type CaptureGuide = {
+  title: string;
+  hints: string[];
+  // 画像上で犬の頭が来るべき側。指定するとカメラ映像の端に矢印を表示する
+  headSide?: "left" | "right";
+};
+
 type Props = {
   onCapture: (file: File) => void;
   onCancel?: () => void;
+  guide?: CaptureGuide;
 };
 
-export function MediaCapture({ onCapture, onCancel }: Props) {
+export function MediaCapture({ onCapture, onCancel, guide }: Props) {
   const [mode, setMode] = useState<Mode>("live");
   const [starting, setStarting] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,6 +128,26 @@ export function MediaCapture({ onCapture, onCancel }: Props) {
           <>
             <div className="relative w-full flex-1 min-h-0 rounded-2xl overflow-hidden bg-black">
               <video ref={videoRef} className="w-full h-full object-cover" muted playsInline autoPlay />
+              {guide && (
+                <>
+                  <div className="absolute top-3 left-3 right-3 flex justify-center pointer-events-none">
+                    <div className="rounded-xl bg-black/60 px-4 py-2 text-center text-white">
+                      <p className="text-sm font-bold">{guide.title}</p>
+                      {guide.hints.map((h) => (
+                        <p key={h} className="text-xs text-white/80">{h}</p>
+                      ))}
+                    </div>
+                  </div>
+                  {guide.headSide && (
+                    <div
+                      className={`absolute top-1/2 -translate-y-1/2 ${guide.headSide === "left" ? "left-3" : "right-3"}
+                        rounded-xl bg-black/60 px-3 py-2 text-sm font-bold text-white pointer-events-none`}
+                    >
+                      {guide.headSide === "left" ? "← 頭" : "頭 →"}
+                    </div>
+                  )}
+                </>
+              )}
               {starting && (
                 <div className="absolute inset-0 flex items-center justify-center text-sm font-bold text-white/80">
                   カメラを起動しています…

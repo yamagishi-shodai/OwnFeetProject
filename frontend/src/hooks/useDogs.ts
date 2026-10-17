@@ -34,12 +34,12 @@ export function useDogs() {
           (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         );
         const latest = sessions[0] ?? null;
-        const sideRight = latest?.session_views?.find((v: any) => v.view_type === "side_right");
+        const sideView = latest?.session_views?.find((v: any) => v.view_type === "side_left" || v.view_type === "side_right");
         return {
           ...d,
           sessionCount: sessions.length,
           latestSession: latest,
-          thumbnailUrl: sideRight?.image_url ?? latest?.image_url ?? null,
+          thumbnailUrl: sideView?.image_url ?? latest?.image_url ?? null,
         };
       });
       setDogs(enriched);

@@ -1,54 +1,47 @@
 "use client";
 
-import { FormEvent, Suspense, useState } from "react";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase";
 import { useDogs } from "@/hooks/useDogs";
-import { uploadSessionView } from "@/lib/session-views";
+import { createSession } from "@/hooks/useKarte";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { MediaCapture } from "@/components/capture/MediaCapture";
 
-// マットPDF生成（印刷用）が参照する標準サイズ。ユーザー入力は廃止し固定値を使う
-const STANDARD_MAT_WIDTH_CM = 84;
-const STANDARD_MAT_HEIGHT_CM = 119;
-
-type Step = "capture" | "details";
 type DogMode = "new" | "existing";
 
+// 採寸開始 = 犬を決めて空のカルテを作る。撮影・点の配置はカルテから行う
 function NewSessionForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const defaultDogId = searchParams.get("dog_id") ?? "";
 
   const { dogs, loading: dogsLoading, createDog } = useDogs();
-  const [step, setStep] = useState<Step>("capture");
-  const [capturedFile, setCapturedFile] = useState<File | null>(null);
-  const [capturedPreviewUrl, setCapturedPreviewUrl] = useState<string | null>(null);
-  // ?dog_id= 付きで来た場合（犬詳細の「＋新しい採寸」）は既存犬選択をデフォルトにする
-  const [dogMode, setDogMode] = useState<DogMode>(defaultDogId ? "existing" : "new");
-  const [dogId, setDogId] = useState(defaultDogId);
+  const [dogMode, setDogMode] = useState<DogMode>("new");
+  const [dogId, setDogId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleCapture(file: File) {
-    setCapturedFile(file);
-    setCapturedPreviewUrl(URL.createObjectURL(file));
-    setStep("details");
+  // セッション（空のカルテ）を作ってカルテページへ
+  async function startKarte(targetDogId: string): Promise<string | null> {
+    const { id: sessionId, error: err } = await createSession(targetDogId);
+    if (!sessionId) return err ?? "カルテの作成に失敗しました";
+    router.replace(`/dogs/${targetDogId}?session=${sessionId}`);
+    return null;
   }
 
-  function handleRetake() {
-    if (capturedPreviewUrl) URL.revokeObjectURL(capturedPreviewUrl);
-    setCapturedFile(null);
-    setCapturedPreviewUrl(null);
-    setStep("capture");
-  }
+  // ?dog_id= 付き（犬の登録直後など）は選択を飛ばしてすぐカルテを作る。
+  // 開発時の StrictMode で effect が2回走っても1件だけ作るよう ref で守る
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!defaultDogId || autoStarted.current) return;
+    autoStarted.current = true;
+    startKarte(defaultDogId).then(err => { if (err) setError(err); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultDogId]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!capturedFile) { setError("写真または動画を撮影してください"); return; }
-
     setSaving(true);
     setError(null);
 
@@ -74,62 +67,25 @@ function NewSessionForm() {
       return;
     }
 
-    const { data: session, error: sessionErr } = await supabase
-      .from("measurement_sessions")
-      .insert({
-        dog_id: resolvedDogId,
-        mat_width_cm: STANDARD_MAT_WIDTH_CM,
-        mat_height_cm: STANDARD_MAT_HEIGHT_CM,
-        image_url: null, pixels_per_cm: null, notes: null,
-      })
-      .select()
-      .single();
-
-    if (sessionErr || !session) {
-      setError(sessionErr?.message ?? "セッション作成に失敗しました");
-      setSaving(false);
-      return;
-    }
-
-    const { error: viewErr } = await uploadSessionView(session.id, "side_right", capturedFile);
-    if (viewErr) {
-      setError(viewErr);
-      setSaving(false);
-      return;
-    }
-
-    router.push(`/sessions/${session.id}/3d`);
+    const err = await startKarte(resolvedDogId);
+    if (err) { setError(err); setSaving(false); }
   }
 
-  if (step === "capture") {
-    return <MediaCapture onCapture={handleCapture} onCancel={() => router.back()} />;
+  if (defaultDogId) {
+    return (
+      <p className={`p-8 text-sm ${error ? "text-accent-red" : "text-ink-muted"}`}>
+        {error ?? "カルテを作成しています…"}
+      </p>
+    );
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <h1 className="text-xl font-bold text-ink-dark mb-6">採寸セッションを開始</h1>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+    <div className="max-w-xl mx-auto px-4 py-8">
+      <h1 className="text-xl font-bold text-ink-dark mb-1">採寸を開始</h1>
+      <p className="text-sm text-ink-muted mb-6">採寸する犬を選ぶと、カルテが作成されます。撮影はカルテから行います。</p>
+      <div className="flex flex-col gap-6">
 
-        {/* 左: 撮影済み画像プレビュー */}
-        <Card className="flex flex-col gap-2">
-          {capturedPreviewUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={capturedPreviewUrl}
-              alt="撮影した画像"
-              className="w-full max-h-[60vh] object-contain rounded-xl bg-warm-gutter"
-            />
-          )}
-          <button
-            type="button"
-            onClick={handleRetake}
-            className="text-xs text-accent-blue hover:underline self-start"
-          >
-            撮り直す
-          </button>
-        </Card>
-
-        {/* 右: 犬の割り当て */}
+        {/* 犬の選択 */}
         <Card>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
 
@@ -210,7 +166,7 @@ function NewSessionForm() {
                 キャンセル
               </Button>
               <Button type="submit" variant="primary" disabled={saving}>
-                {saving ? "作成中…" : "採寸を開始する"}
+                {saving ? "作成中…" : "カルテを作成する"}
               </Button>
             </div>
           </form>

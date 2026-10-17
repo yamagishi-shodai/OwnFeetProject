@@ -27,11 +27,10 @@ export function RecentActivity() {
                 <p className="text-sm font-bold text-ink-dark">{session.dog_name}</p>
                 <p className="text-xs text-ink-muted">
                   {new Date(session.created_at).toLocaleDateString("ja-JP")}
-                  {session.pixels_per_cm ? "" : " · スケール未設定"}
                 </p>
               </div>
-              <Link href={`/sessions/${session.id}/3d`} className={linkButtonClass("secondary", "sm")}>
-                続きから
+              <Link href={`/dogs/${session.dog_id}?session=${session.id}`} className={linkButtonClass("secondary", "sm")}>
+                カルテを開く
               </Link>
             </Card>
           ))}

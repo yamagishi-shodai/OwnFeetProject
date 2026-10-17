@@ -1,7 +1,7 @@
 "use client";
 
-import React from "react";
-import { Canvas } from "@react-three/fiber";
+import React, { useEffect } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Html, Line, GizmoHelper, GizmoViewport } from "@react-three/drei";
 import * as THREE from "three";
 import type { Keypoint3D } from "@/types";
@@ -13,6 +13,7 @@ const SKELETON_EDGES: [string, string][] = [
   ["右腰", "左腰"],
   ["右肩", "右腰"],
   ["左肩", "左腰"],
+  ["鼻先", "首"],
   ["首",   "右肩"],
   ["首",   "左肩"],
   ["尾根", "右腰"],
@@ -30,9 +31,10 @@ function toThree(x: number, y: number, z: number): [number, number, number] {
 }
 
 // ── グリッド（床面 = XY平面 = Three.jsのXZ平面） ─────────────
-function FloorGrid({ center }: { center: [number, number, number] }) {
-  const size = 60;
+function FloorGrid({ center, radius }: { center: [number, number, number]; radius: number }) {
   const step = 10;
+  // 点の広がりを覆う大きさ（10cm 単位、最低 60cm）
+  const size = Math.max(60, Math.ceil((radius * 2.4) / (step * 2)) * step * 2);
   const lines: React.ReactNode[] = [];
   const halfSize = size / 2;
   const cx = center[0]; // Three.js X = 体長
@@ -52,11 +54,12 @@ function FloorGrid({ center }: { center: [number, number, number] }) {
 }
 
 // ── キーポイント球 ────────────────────────────────────────────
-function KpSphere({ kp, selected }: { kp: Keypoint3D; selected: boolean }) {
+function KpSphere({ kp, selected, scale }: { kp: Keypoint3D; selected: boolean; scale: number }) {
   const status = keypointStatus(kp);
   const pos = toThree(kp.x_cm ?? 0, kp.y_cm ?? 0, kp.z_cm ?? 0);
   const color = selected ? "#D16340" : status.complete ? "#3E6954" : "#cfaa55";
-  const r = selected ? 0.7 : 0.55;
+  // 点群の大きさ（scale = 包む球の半径）に合わせて見た目の大きさを揃える
+  const r = scale * (selected ? 0.03 : 0.024);
 
   return (
     <group position={pos}>
@@ -73,7 +76,6 @@ function KpSphere({ kp, selected }: { kp: Keypoint3D; selected: boolean }) {
       {/* ラベル: HTML オーバーレイ */}
       <Html
         center
-        distanceFactor={40}
         style={{ pointerEvents: "none", whiteSpace: "nowrap" }}
       >
         <span style={{
@@ -121,26 +123,60 @@ function SkeletonEdges({ keypoints }: { keypoints: Keypoint3D[] }) {
 }
 
 // ── メインシーン ──────────────────────────────────────────────
-function Scene({ keypoints, selectedLabel, center }: { keypoints: Keypoint3D[]; selectedLabel: string; center: [number, number, number] }) {
+// ── 点の広がりに合わせてカメラを自動で引く ──────────────────────
+// 点群を包む球（中心 center・半径 radius）が縦横どちらの画角にも収まる距離に置く
+const VIEW_DIR = new THREE.Vector3(40, 30, -50).normalize(); // -Z 側から見下ろす（X+ が画面左）
+const FIT_MARGIN = 1.0;
+
+function FitCamera({ cx, cy, cz, radius }: { cx: number; cy: number; cz: number; radius: number }) {
+  const get = useThree(s => s.get);
+  const controlsReady = useThree(s => !!s.controls);
+  const width = useThree(s => s.size.width);
+  const height = useThree(s => s.size.height);
+
+  useEffect(() => {
+    // 描画サイズ確定前（0px）に計算すると距離が無限大になりカメラが NaN になる
+    if (width <= 0 || height <= 0) return;
+    const camera = get().camera as THREE.PerspectiveCamera;
+    const controls = get().controls as unknown as { target: THREE.Vector3; update: () => void } | null;
+    const vFov = THREE.MathUtils.degToRad(camera.fov);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * (width / Math.max(height, 1)));
+    const dist = (radius / Math.sin(Math.min(vFov, hFov) / 2)) * FIT_MARGIN;
+    if (!Number.isFinite(dist)) return;
+    const target = new THREE.Vector3(cx, cy, cz);
+
+    camera.position.copy(target).addScaledVector(VIEW_DIR, dist);
+    camera.near = Math.max(0.1, dist / 100);
+    camera.far = dist * 20;
+    camera.updateProjectionMatrix();
+    camera.lookAt(target);
+    if (controls) { controls.target.copy(target); controls.update(); }
+  }, [get, controlsReady, cx, cy, cz, radius, width, height]);
+
+  return null;
+}
+
+function Scene({ keypoints, selectedLabel, center, radius }: { keypoints: Keypoint3D[]; selectedLabel: string; center: [number, number, number]; radius: number }) {
   return (
     <>
       <ambientLight intensity={1.2} />
       <directionalLight position={[20, 30, 20]} intensity={0.8} />
 
-      <FloorGrid center={center} />
+      <FloorGrid center={center} radius={radius} />
       <axesHelper args={[20]} />
 
       <SkeletonEdges keypoints={keypoints} />
 
       {keypoints.map(kp => (
-        <KpSphere key={kp.id} kp={kp} selected={kp.label === selectedLabel} />
+        <KpSphere key={kp.id} kp={kp} selected={kp.label === selectedLabel} scale={radius} />
       ))}
 
       <OrbitControls
-        target={center}
-        minDistance={5}
-        maxDistance={300}
+        makeDefault
+        minDistance={radius * 0.3}
+        maxDistance={radius * 15}
       />
+      <FitCamera cx={center[0]} cy={center[1]} cz={center[2]} radius={radius} />
 
       <GizmoHelper alignment="bottom-right" margin={[72, 72]}>
         <GizmoViewport
@@ -161,17 +197,17 @@ type Props = {
 };
 
 export function KeypointViewer3D({ keypoints, selectedLabel, className = "", style }: Props) {
-  // 重心を Three.js 座標で計算（床面 Y=0 固定）。カメラはこの重心からの相対位置に置く
-  // ——固定のワールド座標にすると、データの重心が原点から離れている場合に
-  // 視点が被写体からズレて水平に近いグレージング角度になり、3Dビューが横倒しに見えてしまう
+  // 3軸そろった点（＋床面 Y=0）を包む箱の中心と半径を Three.js 座標で求め、カメラをそこに合わせる
   const complete = keypoints.filter(k => keypointStatus(k).complete);
-  const center: [number, number, number] = complete.length > 0
-    ? [
-        complete.reduce((s, k) => s + k.x_cm!, 0) / complete.length,
-        0,
-        complete.reduce((s, k) => s + k.y_cm!, 0) / complete.length, // Three.js Z = Y_db
-      ]
-    : [0, 0, 0];
+  const pts = complete.map(k => toThree(k.x_cm!, k.y_cm!, k.z_cm!));
+  let center: [number, number, number] = [0, 0, 0];
+  let radius = 30;
+  if (pts.length > 0) {
+    const min = [0, 1, 2].map(i => Math.min(...pts.map(p => p[i]), i === 1 ? 0 : Infinity));
+    const max = [0, 1, 2].map(i => Math.max(...pts.map(p => p[i]), i === 1 ? 0 : -Infinity));
+    center = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+    radius = Math.max(10, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2);
+  }
 
   return (
     <div
@@ -179,13 +215,14 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
       style={style}
     >
       <Canvas
-        camera={{ position: [center[0] + 40, center[1] + 30, center[2] + 50], fov: 50, near: 0.1, far: 2000 }}
+        // 初期位置は FitCamera が決める。-Z 側（Y_db 負側）から見て X+（頭方向）を画面左に向ける
+        camera={{ fov: 50 }}
         gl={{ antialias: true, toneMapping: THREE.NoToneMapping }}
         onCreated={({ gl }) => {
           gl.setClearColor("#eae4e1");
         }}
       >
-        <Scene keypoints={keypoints} selectedLabel={selectedLabel} center={center} />
+        <Scene keypoints={keypoints} selectedLabel={selectedLabel} center={center} radius={radius} />
       </Canvas>
 
       {/* 凡例 */}
@@ -202,9 +239,11 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
         <span className="font-bold text-[#D16340]">Z: 上下（高さ）</span>
       </div>
 
-      {keypoints.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center text-sm text-ink-muted pointer-events-none">
-          キーポイントを配置すると3Dで表示されます
+      {/* 3軸そろった参照点がまだない */}
+      {complete.length === 0 && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 pointer-events-none">
+          <p className="text-base font-bold text-ink-dark bg-white/80 rounded-xl px-4 py-2">採寸を実施してください</p>
+          <p className="text-xs text-ink-muted">左側面と真上の写真に点を配置すると3Dで表示されます</p>
         </div>
       )}
 

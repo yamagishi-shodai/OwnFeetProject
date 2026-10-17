@@ -7,6 +7,7 @@ import { linkButtonClass } from "@/components/ui/Button";
 import { DogCard } from "@/components/dogs/DogCard";
 import { SummaryBar } from "@/components/home/SummaryBar";
 import { RecentActivity } from "@/components/home/RecentActivity";
+import { MeasurementSteps } from "@/components/home/MeasurementSteps";
 
 const PET_PREVIEW_LIMIT = 5;
 
@@ -16,13 +17,14 @@ export default function HomePage() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 flex flex-col gap-6">
       {/* ウェルカムバナー */}
-      <Card className="flex flex-col gap-3">
+      <Card className="flex flex-col gap-4">
         <div>
           <h1 className="text-xl font-bold text-ink-dark">ようこそ、採寸プラットフォームへ</h1>
           <p className="text-sm text-ink-muted mt-1">
-            採寸マットと写真から、犬の体のサイズを正確に記録・管理できます。
+            基準物と写真から、犬の体のサイズを正確に記録・管理できます。
           </p>
         </div>
+        <MeasurementSteps />
         <div className="flex gap-3">
           <Link href="/sessions/new" className={linkButtonClass("primary")}>
             採寸をはじめる

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { use3DSession } from "@/hooks/use3DSession";
 import { ViewCanvas, type CalibPoint } from "@/components/measurement/ViewCanvas";
 import { Keypoint3DList, PRESET_LABELS } from "@/components/measurement/Keypoint3DList";
+import { keypointStatus, isSideOnly, SIDE_ONLY_LABELS } from "@/lib/coords-3d";
 import { VIEW_LABELS } from "@/types";
 import type { ViewType } from "@/types";
 
@@ -25,13 +26,14 @@ function ViewSettingsPage() {
   const router = useRouter();
   const initialView = useSearchParams().get("view") as ViewType | null;
   const [calibPoints, setCalibPoints] = useState<CalibPoint[]>([]);
-  const [knownCm, setKnownCm] = useState<number | null>(null);
+  // 基準物の長さ。入力途中（空欄など）でも壊れないよう文字列で持ち、使うときに数値化する
+  const [knownCmText, setKnownCmText] = useState("");
   // 真上ビューの犬の向き: "left"=頭が画像左(デフォルト), "right"=頭が画像右
   const [topHeadDir, setTopHeadDir] = useState<"left" | "right">("left");
 
   const {
     views, keypoints, clicks, activeView,
-    selectedLabel, dogId, matWidthCm, loading, saving, error, savedFlash,
+    selectedLabel, dogId, loading, saving, error, savedFlash,
     calibrateView, resetScale, placeClick, deleteKeypoint,
     setActiveView, setLabel,
   } = use3DSession(id, initialView ?? undefined);
@@ -43,19 +45,17 @@ function ViewSettingsPage() {
   // ビューが変わったらキャリブ点をリセット
   useEffect(() => {
     setCalibPoints([]);
-    setKnownCm(null);
+    setKnownCmText("");
   }, [activeView?.id]);
 
-  // matWidthCm がロードされたら knownCm に初期値を入れる
-  useEffect(() => {
-    if (matWidthCm && knownCm === null) setKnownCm(matWidthCm);
-  }, [matWidthCm, knownCm]);
+  const knownCm = parseFloat(knownCmText);
+  const knownCmValid = Number.isFinite(knownCm) && knownCm > 0;
 
   if (loading) return <p className="p-8 text-sm text-ink-muted">読み込み中…</p>;
 
-  const confirmedCount = keypoints.filter(
-    k => k.x_cm != null && k.y_cm != null && k.z_cm != null
-  ).length;
+  const confirmedCount = keypoints.filter(k => keypointStatus(k).complete).length;
+  // 真上ビューでは側面のみの部位（喉元・胸部・胸骨下部・尻）は置けない
+  const isTopView = activeView?.view_type === "top";
 
   function handleCanvasClick(pixelX: number, pixelY: number, imgW: number, imgH: number) {
     if (!activeView) return;
@@ -63,6 +63,7 @@ function ViewSettingsPage() {
       // キャリブレーションモード: 2点を蓄積
       setCalibPoints(prev => prev.length < 2 ? [...prev, { x: pixelX, y: pixelY }] : prev);
     } else {
+      if (isTopView && isSideOnly(selectedLabel)) return;
       placeClick(activeView.id, pixelX, pixelY, imgW, imgH, topAxisFlip());
       goNextLabel(); // 次の部位ラベルへ自動で進む
     }
@@ -86,7 +87,8 @@ function ViewSettingsPage() {
   }
 
   // 部位の順番（プリセット → 独自ラベル）
-  const allLabels = [...PRESET_LABELS, ...keypoints.map(k => k.label).filter(l => !PRESET_LABELS.includes(l))];
+  const allLabels = [...PRESET_LABELS, ...keypoints.map(k => k.label).filter(l => !PRESET_LABELS.includes(l))]
+    .filter(l => !(isTopView && isSideOnly(l)));
   const labelIdx = allLabels.indexOf(selectedLabel);
 
   function goPrevLabel() {
@@ -121,11 +123,11 @@ function ViewSettingsPage() {
   }
 
   async function handleCalibConfirm() {
-    if (!activeView || calibPoints.length < 2 || !knownCm) return;
+    if (!activeView || calibPoints.length < 2 || !knownCmValid) return;
     const dx = calibPoints[1].x - calibPoints[0].x;
     const dy = calibPoints[1].y - calibPoints[0].y;
     const pixelDist = Math.sqrt(dx * dx + dy * dy);
-    await calibrateView(activeView.id, pixelDist, knownCm);
+    await calibrateView(activeView.id, pixelDist, knownCm, topAxisFlip());
     setCalibPoints([]);
   }
 
@@ -238,6 +240,15 @@ function ViewSettingsPage() {
                 onBack={calibPoints.length > 0 ? () => setCalibPoints(prev => prev.slice(0, -1)) : undefined}
               />
             )}
+            {activeView && !isCalibMode && labelIdx < 0 && isTopView && isSideOnly(selectedLabel) && (
+              <ClickPrompt
+                tone="keypoint"
+                step="真上ビュー"
+                title={<><Em tone="keypoint">{selectedLabel}</Em>は側面の写真でのみ配置します</>}
+                sub="右の一覧から別の部位を選んでください"
+                onSkip={() => setLabel(allLabels[0])}
+              />
+            )}
             {activeView && !isCalibMode && labelIdx >= 0 && (
               <ClickPrompt
                 tone={allPlacedInView ? "done" : "keypoint"}
@@ -278,12 +289,13 @@ function ViewSettingsPage() {
               {isCalibMode && calibPoints.length === 2 && (
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-72
                   bg-white rounded-2xl shadow-lg border border-border-default p-4 flex flex-col gap-3">
-                  <p className="text-xs font-bold text-ink-primary">2点間の距離を入力</p>
+                  <p className="text-xs font-bold text-ink-primary">基準物の長さ（点A〜点B）を入力</p>
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
-                      value={knownCm ?? ""}
-                      onChange={e => setKnownCm(parseFloat(e.target.value))}
+                      value={knownCmText}
+                      onChange={e => setKnownCmText(e.target.value)}
+                      placeholder="例: 30"
                       min="0.1"
                       step="0.5"
                       className="w-24 px-3 py-2 rounded-xl border border-border-default text-sm text-center font-bold"
@@ -299,7 +311,7 @@ function ViewSettingsPage() {
                     </button>
                     <button
                       onClick={handleCalibConfirm}
-                      disabled={saving || !knownCm}
+                      disabled={saving || !knownCmValid}
                       className="flex-1 py-2 rounded-xl bg-accent-yellow text-white text-xs font-bold disabled:opacity-50"
                     >
                       {saving ? "保存中…" : "スケール確定"}
@@ -343,6 +355,7 @@ function ViewSettingsPage() {
                 selectedLabel={selectedLabel}
                 onSelectLabel={setLabel}
                 onDelete={deleteKeypoint}
+                disabledLabels={isTopView ? SIDE_ONLY_LABELS : []}
               />
             </section>
           </div>

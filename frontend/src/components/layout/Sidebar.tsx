@@ -51,7 +51,7 @@ const PetListIcon = () => (
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "ホーム", icon: <HomeIcon /> },
-  { href: "/sessions/new", label: "採寸開始", icon: <CameraIcon /> },
+  { href: "/sessions/new", label: "新しいカルテをつくる", icon: <CameraIcon /> },
   { href: "/dogs", label: "登録済みペット", icon: <PetListIcon /> },
 ];
 

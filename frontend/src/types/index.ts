@@ -1,3 +1,5 @@
+import type { ManualMetrics } from "@/lib/body-metrics";
+
 // ── ドメインモデル ─────────────────────────────────────────────
 
 export type Dog = {
@@ -32,6 +34,8 @@ export type MeasurementSession = {
   mat_height_cm: number;
   marker_size_cm: number;
   notes: string | null;
+  // 採寸値の実測値と 3D への採用フラグ（supabase/migrations/20261017_add_manual_metrics.sql）
+  manual_metrics?: ManualMetrics | null;
   created_at: string;
 };
 

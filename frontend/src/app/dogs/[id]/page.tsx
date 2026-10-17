@@ -17,7 +17,7 @@ function DogKartePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const sessionParam = useSearchParams().get("session");
-  const { dog, session, sessions, loading, error, reload, addPhoto, deleteSession } = useKarte(id, sessionParam);
+  const { dog, session, sessions, loading, error, reload, addPhoto, replacePhoto, deleteSession, saveManualMetrics } = useKarte(id, sessionParam);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -91,7 +91,9 @@ function DogKartePage() {
         dogId={dog.id}
         session={session}
         onAddPhoto={addPhoto}
+        onReplacePhoto={replacePhoto}
         onNewSession={handleNewSession}
+        onSaveManual={saveManualMetrics}
         busy={busy}
       />
 

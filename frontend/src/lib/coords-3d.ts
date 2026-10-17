@@ -87,13 +87,29 @@ export function distance3D(
 }
 
 // ── キーポイントの確定状況 ────────────────────────────────────
-export function keypointStatus(kp: Pick<Keypoint3D, "x_cm" | "y_cm" | "z_cm">) {
+// 側面からしか位置が分からない、体の正中線上の部位（真上の写真では見えない）。
+// Y（体幅）は持たず、X・Z がそろえば確定とする。3D では正中線（midlineY）に置く
+export const SIDE_ONLY_LABELS = ["喉元", "胸部", "胸骨下部", "尻"];
+export const isSideOnly = (label: string) => SIDE_ONLY_LABELS.includes(label);
+
+export function keypointStatus(kp: Pick<Keypoint3D, "x_cm" | "y_cm" | "z_cm"> & { label?: string }) {
+  const sideOnly = kp.label != null && isSideOnly(kp.label);
+  const y = kp.y_cm != null || sideOnly;
   return {
     x: kp.x_cm != null,
-    y: kp.y_cm != null,
+    y,
     z: kp.z_cm != null,
-    complete: kp.x_cm != null && kp.y_cm != null && kp.z_cm != null,
+    complete: kp.x_cm != null && y && kp.z_cm != null,
+    sideOnly,
   };
+}
+
+// 正中線の Y = Y を持つ確定点の平均（なければ 0）。側面のみの部位の Y の代わりに使う
+export function midlineY(keypoints: Pick<Keypoint3D, "x_cm" | "y_cm" | "z_cm">[]): number {
+  const ys = keypoints
+    .filter(k => k.x_cm != null && k.y_cm != null && k.z_cm != null)
+    .map(k => k.y_cm!);
+  return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : 0;
 }
 
 // ── ビューが持つ軸の名前 ─────────────────────────────────────

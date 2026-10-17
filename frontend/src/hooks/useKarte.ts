@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { uploadSessionView } from "@/lib/session-views";
-import { keypointStatus } from "@/lib/coords-3d";
+import { uploadSessionView, deleteSessionViews } from "@/lib/session-views";
+import { keypointStatus, isSideOnly } from "@/lib/coords-3d";
 import type { Dog, Keypoint3D, MeasurementSession, SessionView, ViewClick, ViewType } from "@/types";
+import type { ManualMetrics } from "@/lib/body-metrics";
 
 // マットPDF生成（印刷用）が参照する標準サイズ。セッション作成時に固定値で入れる
 const STANDARD_MAT_WIDTH_CM = 84;
@@ -28,6 +29,7 @@ export type KarteSession = {
   views: SessionView[];
   keypoints: Keypoint3D[];
   clicks: ViewClick[];
+  manualMetrics: ManualMetrics | null;
 };
 
 // 新しい採寸セッションを作る（採寸開始・カルテの「新しい採寸を始める」から使う）
@@ -92,6 +94,7 @@ export function useKarte(dogId: string, sessionId: string | null) {
     views: [...row.session_views].sort((a, b) => b.created_at.localeCompare(a.created_at)),
     keypoints: row.keypoints_3d,
     clicks: row.keypoints_3d.flatMap(k => k.view_clicks),
+    manualMetrics: row.manual_metrics ?? null,
   };
 
   const sessions: KarteSessionSummary[] = rows.map(r => ({
@@ -115,6 +118,33 @@ export function useKarte(dogId: string, sessionId: string | null) {
     return { sessionId: sid, error: null };
   }
 
+  // 写真を差し替える: 新しい写真を登録 → 古い写真・その点・スケールを削除 →
+  // その写真でしか決まらない座標（左側面=高さZ・側面のみ部位のX／真上=体幅Y）を空に戻す。
+  // 呼び出し側で設定ページへ移り、点を置き直してもらう
+  async function replacePhoto(viewType: ViewType, file: File): Promise<{ sessionId: string | null; error: string | null }> {
+    if (!session) return addPhoto(viewType, file);
+    const oldViews = session.views.filter(v => v.view_type === viewType);
+    const oldViewIds = new Set(oldViews.map(v => v.id));
+    const affected = session.keypoints.filter(k =>
+      session.clicks.some(c => c.keypoint_3d_id === k.id && oldViewIds.has(c.view_id))
+    );
+
+    const { error: upErr } = await uploadSessionView(session.id, viewType, file);
+    if (upErr) return { sessionId: session.id, error: upErr };
+
+    const delErr = await deleteSessionViews(oldViews);
+    if (delErr) { await reload(); return { sessionId: session.id, error: delErr }; }
+
+    for (const k of affected) {
+      const patch = viewType === "top"
+        ? { y_cm: null }
+        : isSideOnly(k.label) ? { x_cm: null, z_cm: null } : { z_cm: null };
+      await supabase.from("keypoints_3d").update(patch).eq("id", k.id);
+    }
+    await reload();
+    return { sessionId: session.id, error: null };
+  }
+
   async function deleteSession(id: string): Promise<string | null> {
     const { error: delErr } = await supabase.from("measurement_sessions").delete().eq("id", id);
     if (delErr) return delErr.message;
@@ -122,5 +152,19 @@ export function useKarte(dogId: string, sessionId: string | null) {
     return null;
   }
 
-  return { dog, session, sessions, loading, error, reload, addPhoto, deleteSession };
+  // 実測値を保存（画面側で先に反映済みなので再読み込みはしない）
+  async function saveManualMetrics(sessionId: string, value: ManualMetrics): Promise<string | null> {
+    const { error: err } = await supabase
+      .from("measurement_sessions")
+      .update({ manual_metrics: value })
+      .eq("id", sessionId);
+    if (!err) return null;
+    // 列がまだない（マイグレーション未実行）
+    if (/manual_metrics/.test(err.message)) {
+      return "実測値を保存する列が DB にありません。supabase/migrations/20261017_add_manual_metrics.sql を実行してください";
+    }
+    return err.message;
+  }
+
+  return { dog, session, sessions, loading, error, reload, addPhoto, replacePhoto, deleteSession, saveManualMetrics };
 }

@@ -1,185 +1,131 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useDogs } from "@/hooks/useDogs";
+import { supabase } from "@/lib/supabase";
 import { createSession } from "@/hooks/useKarte";
-import { Card } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
+import { uploadSessionView } from "@/lib/session-views";
+import { Karte } from "@/components/karte/Karte";
+import type { DogPatch } from "@/components/dogs/DogInfoForm";
+import type { ViewType } from "@/types";
 
-type DogMode = "new" | "existing";
+const UNNAMED = "名前未設定";
 
-// 採寸開始 = 犬を決めて空のカルテを作る。撮影・点の配置はカルテから行う
-function NewSessionForm() {
+type Created = { dogId: string; sessionId: string | null };
+
+// ?dog_id= 付き（犬の登録直後など）: すぐにその犬のカルテ（セッション）を作って移動する
+function StartForExistingDog({ dogId }: { dogId: string }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const defaultDogId = searchParams.get("dog_id") ?? "";
-
-  const { dogs, loading: dogsLoading, createDog } = useDogs();
-  const [dogMode, setDogMode] = useState<DogMode>("new");
-  const [dogId, setDogId] = useState("");
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // セッション（空のカルテ）を作ってカルテページへ
-  async function startKarte(targetDogId: string): Promise<string | null> {
-    const { id: sessionId, error: err } = await createSession(targetDogId);
-    if (!sessionId) return err ?? "カルテの作成に失敗しました";
-    router.replace(`/dogs/${targetDogId}?session=${sessionId}`);
-    return null;
-  }
-
-  // ?dog_id= 付き（犬の登録直後など）は選択を飛ばしてすぐカルテを作る。
   // 開発時の StrictMode で effect が2回走っても1件だけ作るよう ref で守る
-  const autoStarted = useRef(false);
+  const started = useRef(false);
+
   useEffect(() => {
-    if (!defaultDogId || autoStarted.current) return;
-    autoStarted.current = true;
-    startKarte(defaultDogId).then(err => { if (err) setError(err); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultDogId]);
+    if (started.current) return;
+    started.current = true;
+    createSession(dogId).then(({ id, error: err }) => {
+      if (id) router.replace(`/dogs/${dogId}?session=${id}`);
+      else setError(err ?? "カルテの作成に失敗しました");
+    });
+  }, [dogId, router]);
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setSaving(true);
-    setError(null);
+  return (
+    <p className={`p-8 text-sm ${error ? "text-accent-red" : "text-ink-muted"}`}>
+      {error ?? "カルテを作成しています…"}
+    </p>
+  );
+}
 
-    let resolvedDogId = dogId;
+// 新しいカルテ（下書き）: 空のカルテを表示し、基本情報の入力か撮影をした時点で犬とカルテを DB に作る
+function DraftKarte() {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  // 犬とセッションは1回だけ作る（基本情報の保存と撮影が重なっても二重に作らない）
+  const creating = useRef<Promise<Created | null> | null>(null);
 
-    if (dogMode === "new") {
-      const fd = new FormData(e.currentTarget);
-      const name = (fd.get("name") as string)?.trim();
-      if (!name) { setError("犬の名前を入力してください"); setSaving(false); return; }
-
-      const { dog, error: createErr } = await createDog({
-        name,
-        breed: (fd.get("breed") as string) || null,
-        weight_kg: fd.get("weight_kg") ? Number(fd.get("weight_kg")) : null,
-        birth_date: (fd.get("birth_date") as string) || null,
-        notes: (fd.get("notes") as string) || null,
-      });
-      if (!dog) { setError(createErr ?? "犬の登録に失敗しました"); setSaving(false); return; }
-      resolvedDogId = dog.id;
-    } else if (!resolvedDogId) {
-      setError("犬を選択してください");
-      setSaving(false);
-      return;
+  function ensureKarte(patch?: DogPatch): Promise<Created | null> {
+    if (!creating.current) {
+      creating.current = (async () => {
+        const { data: dog, error: dogErr } = await supabase
+          .from("dogs")
+          .insert({
+            name: patch?.name || UNNAMED,
+            breed: patch?.breed ?? null,
+            weight_kg: patch?.weight_kg ?? null,
+            birth_date: patch?.birth_date ?? null,
+            notes: patch?.notes ?? null,
+          })
+          .select("id")
+          .single();
+        if (!dog) {
+          setError(dogErr?.message ?? "カルテの作成に失敗しました");
+          creating.current = null; // 失敗したら次の操作でやり直せるようにする
+          return null;
+        }
+        // セッション作成に失敗しても犬は作れているので、カルテ側で撮影時に作り直せる
+        const { id: sessionId } = await createSession(dog.id);
+        return { dogId: dog.id, sessionId };
+      })();
     }
-
-    const err = await startKarte(resolvedDogId);
-    if (err) { setError(err); setSaving(false); }
+    return creating.current;
   }
 
-  if (defaultDogId) {
-    return (
-      <p className={`p-8 text-sm ${error ? "text-accent-red" : "text-ink-muted"}`}>
-        {error ?? "カルテを作成しています…"}
-      </p>
-    );
+  function karteUrl({ dogId, sessionId }: Created) {
+    return `/dogs/${dogId}${sessionId ? `?session=${sessionId}` : ""}`;
+  }
+
+  // 基本情報が初めて入力された → 作ってから通常のカルテに切り替える
+  async function handleCreateDog(patch: DogPatch) {
+    const created = await ensureKarte(patch);
+    if (created) router.replace(karteUrl(created));
+  }
+
+  // 撮影した → 作ってから写真を登録（その後 Karte が設定ページへ移る）
+  async function handleAddPhoto(viewType: ViewType, file: File) {
+    const created = await ensureKarte();
+    if (!created) return { sessionId: null, error: "カルテの作成に失敗しました" };
+    let sessionId = created.sessionId;
+    if (!sessionId) {
+      const res = await createSession(created.dogId);
+      if (!res.id) return { sessionId: null, error: res.error ?? "カルテの作成に失敗しました" };
+      sessionId = res.id;
+    }
+    const { error: upErr } = await uploadSessionView(sessionId, viewType, file);
+    return { sessionId, error: upErr };
   }
 
   return (
-    <div className="max-w-xl mx-auto px-4 py-8">
-      <h1 className="text-xl font-bold text-ink-dark mb-1">採寸を開始</h1>
-      <p className="text-sm text-ink-muted mb-6">採寸する犬を選ぶと、カルテが作成されます。撮影はカルテから行います。</p>
-      <div className="flex flex-col gap-6">
-
-        {/* 犬の選択 */}
-        <Card>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-
-            {/* 新規登録 / 既存から選択 の切り替え */}
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setDogMode("new")}
-                className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors
-                  ${dogMode === "new" ? "bg-accent-green text-white" : "bg-border-default text-ink-muted"}`}
-              >
-                新しい犬を登録
-              </button>
-              <button
-                type="button"
-                onClick={() => setDogMode("existing")}
-                className={`text-xs hover:underline ${dogMode === "existing" ? "font-bold text-ink-dark" : "text-ink-muted"}`}
-              >
-                登録済みの犬から選ぶ
-              </button>
-            </div>
-
-            {dogMode === "new" ? (
-              <>
-                <Input id="name" name="name" label="名前 *" placeholder="ポチ" required />
-                <Input id="breed" name="breed" label="犬種" placeholder="柴犬" />
-                <Input
-                  id="weight_kg"
-                  name="weight_kg"
-                  label="体重 (kg)"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  placeholder="5.2"
-                />
-                <Input id="birth_date" name="birth_date" label="生年月日" type="date" />
-                <div className="flex flex-col gap-1">
-                  <label htmlFor="notes" className="text-xs font-bold text-ink-muted">
-                    メモ
-                  </label>
-                  <textarea
-                    id="notes"
-                    name="notes"
-                    rows={3}
-                    placeholder="特記事項など"
-                    className="px-3 py-2 rounded-xl border border-border-default bg-white text-sm text-ink-primary
-                      focus:outline-none focus:ring-2 focus:ring-accent-green/40 focus:border-accent-green resize-none"
-                  />
-                </div>
-              </>
-            ) : (
-              <div className="flex flex-col gap-1">
-                <label htmlFor="dog_id" className="text-xs font-bold text-ink-muted">
-                  対象の犬 *
-                </label>
-                <select
-                  id="dog_id"
-                  value={dogId}
-                  onChange={(e) => setDogId(e.target.value)}
-                  required
-                  className="h-10 px-3 rounded-xl border border-border-default bg-white text-sm text-ink-primary
-                    focus:outline-none focus:ring-2 focus:ring-accent-green/40 focus:border-accent-green"
-                >
-                  <option value="">-- 選択してください --</option>
-                  {!dogsLoading && dogs.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} {d.breed ? `(${d.breed})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {error && <p className="text-sm text-accent-red">{error}</p>}
-
-            <div className="flex justify-end gap-3">
-              <Button type="button" onClick={() => router.back()}>
-                キャンセル
-              </Button>
-              <Button type="submit" variant="primary" disabled={saving}>
-                {saving ? "作成中…" : "カルテを作成する"}
-              </Button>
-            </div>
-          </form>
-        </Card>
+    <div className="max-w-6xl mx-auto px-4 py-6 flex flex-col gap-6">
+      <div>
+        <h1 className="text-xl font-bold text-ink-dark">新しいカルテ</h1>
+        <p className="text-xs text-ink-muted mt-0.5">
+          基本情報を入力するか写真を撮影すると、自動でカルテが保存されます
+        </p>
       </div>
+
+      {error && <p className="text-sm text-accent-red">{error}</p>}
+
+      <Karte
+        dogId={null}
+        session={null}
+        onAddPhoto={handleAddPhoto}
+        onReplacePhoto={handleAddPhoto}
+        onCreateDog={handleCreateDog}
+        onSaveManual={async () => null}
+      />
     </div>
   );
 }
 
-export default function NewSessionPage() {
+function NewKartePage() {
+  const dogId = useSearchParams().get("dog_id");
+  return dogId ? <StartForExistingDog dogId={dogId} /> : <DraftKarte />;
+}
+
+export default function Page() {
   return (
-    <Suspense>
-      <NewSessionForm />
+    <Suspense fallback={<p className="p-8 text-sm text-ink-muted">読み込み中…</p>}>
+      <NewKartePage />
     </Suspense>
   );
 }

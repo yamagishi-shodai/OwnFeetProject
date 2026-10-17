@@ -1,18 +1,20 @@
 "use client";
 
 import type { Keypoint3D } from "@/types";
-import { keypointStatus } from "@/lib/coords-3d";
+import { keypointStatus, isSideOnly } from "@/lib/coords-3d";
 
 type Props = {
   keypoints: Keypoint3D[];
   selectedLabel: string;
   onSelectLabel: (label: string) => void;
   onDelete: (id: string) => void;
+  // 今のビューでは置けない部位（真上ビューでの側面のみの部位など）
+  disabledLabels?: string[];
 };
 
 export const PRESET_LABELS = [
-  "右肩", "左肩", "右腰", "左腰",
-  "鼻先", "首", "尾根", "右前足首", "左前足首",
+  "右前足付け根", "左前足付け根", "右後足付け根", "左後足付け根",
+  "頭頂", "鼻先", "肩甲骨上端", "喉元", "胸部", "胸骨下部", "尾根", "尻", "右前足首", "左前足首",
   "右後足首", "左後足首",
 ];
 
@@ -36,7 +38,7 @@ function AxisBadge({ confirmed, axis }: { confirmed: boolean; axis: string }) {
   );
 }
 
-export function Keypoint3DList({ keypoints, selectedLabel, onSelectLabel, onDelete }: Props) {
+export function Keypoint3DList({ keypoints, selectedLabel, onSelectLabel, onDelete, disabledLabels = [] }: Props) {
   const usedLabels = new Set(keypoints.map(k => k.label));
   const allLabels = Array.from(new Set([...PRESET_LABELS, ...keypoints.map(k => k.label)]));
 
@@ -50,11 +52,14 @@ export function Keypoint3DList({ keypoints, selectedLabel, onSelectLabel, onDele
             const kp = keypoints.find(k => k.label === label);
             const status = kp ? keypointStatus(kp) : null;
             const isSelected = label === selectedLabel;
+            const disabled = disabledLabels.includes(label);
             return (
               <button
                 key={label}
                 onClick={() => onSelectLabel(label)}
-                className={`px-2.5 py-1 rounded-full text-xs font-bold transition-colors
+                disabled={disabled}
+                title={disabled ? "側面の写真でのみ配置できます" : undefined}
+                className={`px-2.5 py-1 rounded-full text-xs font-bold transition-colors disabled:opacity-35 disabled:cursor-not-allowed
                   ${isSelected
                     ? "bg-accent-red text-white"
                     : status?.complete
@@ -103,7 +108,7 @@ export function Keypoint3DList({ keypoints, selectedLabel, onSelectLabel, onDele
                   </div>
                   <div className="grid grid-cols-3 gap-1 text-[11px] tabular-nums">
                     <CoordCell label="X" value={kp.x_cm} />
-                    <CoordCell label="Y" value={kp.y_cm} />
+                    <CoordCell label="Y" value={kp.y_cm} note={isSideOnly(kp.label) ? "側面のみ" : undefined} />
                     <CoordCell label="Z" value={kp.z_cm} />
                   </div>
                 </div>
@@ -116,13 +121,13 @@ export function Keypoint3DList({ keypoints, selectedLabel, onSelectLabel, onDele
   );
 }
 
-function CoordCell({ label, value }: { label: string; value: number | null }) {
+function CoordCell({ label, value, note }: { label: string; value: number | null; note?: string }) {
   return (
     <div className={`rounded px-1.5 py-0.5 ${value != null ? "bg-warm-main" : "bg-border-default/30"}`}>
       <span className="text-ink-muted">{label}: </span>
       {value != null
         ? <span className="font-bold text-ink-primary">{value.toFixed(1)} cm</span>
-        : <span className="text-ink-muted">—</span>
+        : <span className="text-ink-muted">{note ?? "—"}</span>
       }
     </div>
   );

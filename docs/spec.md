@@ -79,6 +79,7 @@ erDiagram
         numeric mat_height_cm
         numeric marker_size_cm
         text notes
+        jsonb manual_metrics
         timestamptz created_at
     }
 
@@ -177,7 +178,7 @@ erDiagram
 |---|---|---|
 | id | uuid PK | - |
 | session_id | uuid FK | - |
-| label | text NOT NULL | 部位名（右肩、首 など） |
+| label | text NOT NULL | 部位名（右前足付け根、肩甲骨上端 など） |
 | x_cm | numeric | 体軸 X（頭方向 +） |
 | y_cm | numeric | 体軸 Y（犬の右方向 +） |
 | z_cm | numeric | 高さ Z（上方向 +） |
@@ -579,7 +580,7 @@ t = (targetZ - C.z) / d.z
 ### 6.8 採寸部位プリセット（PRESET_LABELS）
 
 ```
-右肩 / 左肩 / 右腰 / 左腰 / 首 / 尾根 / 右前足首 / 左前足首 / 右後足首 / 左後足首
+右前足付け根 / 左前足付け根 / 右後足付け根 / 左後足付け根 / 頭頂 / 鼻先 / 肩甲骨上端 / 喉元 / 胸部 / 胸骨下部 / 尾根 / 尻 / 右前足首 / 左前足首 / 右後足首 / 左後足首
 ```
 
 ---

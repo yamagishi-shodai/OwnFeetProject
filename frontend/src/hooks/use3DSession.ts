@@ -28,7 +28,7 @@ type State = {
 const INITIAL: State = {
   views: [], keypoints: [], clicks: [],
   activeViewId: null,
-  selectedLabel: "右肩",
+  selectedLabel: "右前足付け根",
   dogId: null,
   createdAt: null,
   matWidthCm: 0,
@@ -83,6 +83,23 @@ function reducer(s: State, a: Action): State {
   }
 }
 
+// ── 補助 ───────────────────────────────────────────────────────
+
+function sideViewIdSet(views: SessionView[]): Set<string> {
+  return new Set(views.filter(v => v.view_type === "side_left" || v.view_type === "side_right").map(v => v.id));
+}
+
+// 画像の実寸（座標の原点 = 画像中心の計算に使う）
+function loadImageSize(url: string): Promise<{ w: number; h: number } | null> {
+  return new Promise(resolve => {
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
 // ── Hook ───────────────────────────────────────────────────────
 
 export function use3DSession(sessionId: string, initialViewType?: ViewType) {
@@ -115,7 +132,8 @@ export function use3DSession(sessionId: string, initialViewType?: ViewType) {
   // ── ビュー追加（画像アップロード） ──────────────────────────
   // ── キャリブレーション ────────────────────────────────────
   const calibrateView = useCallback(async (
-    viewId: string, pixelDist: number, knownCm: number
+    viewId: string, pixelDist: number, knownCm: number,
+    axisFlip?: { px_inverted?: boolean; py_inverted?: boolean }
   ) => {
     dispatch({ type: "SAVING" });
     const pixels_per_cm = pixelDist / knownCm;
@@ -123,7 +141,28 @@ export function use3DSession(sessionId: string, initialViewType?: ViewType) {
       .from("session_views").update({ pixels_per_cm }).eq("id", viewId).select().single();
     if (error || !data) { dispatch({ type: "ERROR", message: "キャリブレーション失敗" }); return; }
     dispatch({ type: "VIEW_CALIBRATED", view: data });
-  }, []);
+
+    // スケールを設定し直したら、このビューに置いた点の座標も新しいスケールで計算し直す
+    // （しないと古いスケールの座標が残り、写真と3Dがずれる）
+    const viewClicks = state.clicks.filter(c => c.view_id === viewId);
+    if (viewClicks.length === 0 || !data.image_url) return;
+    const size = await loadImageSize(data.image_url);
+    if (!size) return;
+    const baseMap = VIEW_AXIS_MAP[data.view_type as ViewType];
+    const mapOverride = axisFlip ? { ...baseMap, ...axisFlip } : undefined;
+    const sideViewIds = sideViewIdSet(state.views);
+    for (const click of viewClicks) {
+      const kp = state.keypoints.find(k => k.id === click.keypoint_3d_id);
+      if (!kp) continue;
+      const partial = pixelToWorld(click.pixel_x, click.pixel_y, data.view_type, pixels_per_cm, size.w, size.h, mapOverride);
+      if (data.view_type === "top" && state.clicks.some(c => c.keypoint_3d_id === kp.id && sideViewIds.has(c.view_id))) {
+        delete partial.x_cm; // X は側面の写真の値を正とする
+      }
+      const { data: updated } = await supabase
+        .from("keypoints_3d").update(merge3DPoint(kp, partial)).eq("id", kp.id).select().single();
+      if (updated) dispatch({ type: "KEYPOINT_UPSERTED", keypoint: updated });
+    }
+  }, [state.clicks, state.keypoints, state.views]);
 
   // ── スケールリセット ──────────────────────────────────────
   const resetScale = useCallback(async (viewId: string) => {
@@ -153,6 +192,14 @@ export function use3DSession(sessionId: string, initialViewType?: ViewType) {
       : undefined;
     const partial = pixelToWorld(pixelX, pixelY, view.view_type, view.pixels_per_cm!, imgW, imgH, mapOverride);
     const existing = state.keypoints.find(k => k.label === label);
+
+    // 写真ごとに原点（画像中心）も縮尺も違うので、体長 X は側面の写真の値を正とする。
+    // 真上の写真は体幅 Y のために使い、その点が側面にもあるなら X は上書きしない
+    if (view.view_type === "top" && existing) {
+      const sideViewIds = sideViewIdSet(state.views);
+      const hasSideClick = state.clicks.some(c => c.keypoint_3d_id === existing.id && sideViewIds.has(c.view_id));
+      if (hasSideClick) delete partial.x_cm;
+    }
 
     let keypoint: Keypoint3D;
     if (existing) {
@@ -195,7 +242,7 @@ export function use3DSession(sessionId: string, initialViewType?: ViewType) {
     }
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1800);
-  }, [state.views, state.keypoints, state.selectedLabel, sessionId]);
+  }, [state.views, state.keypoints, state.clicks, state.selectedLabel, sessionId]);
 
   // ── キーポイント削除 ──────────────────────────────────────
   const deleteKeypoint = useCallback(async (id: string) => {

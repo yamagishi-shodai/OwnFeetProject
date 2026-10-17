@@ -27,7 +27,7 @@ export default function HomePage() {
         <MeasurementSteps />
         <div className="flex gap-3">
           <Link href="/sessions/new" className={linkButtonClass("primary")}>
-            採寸をはじめる
+            新しいカルテをつくる
           </Link>
           <Link href="/dogs/new" className={linkButtonClass("secondary")}>
             ペットを登録

@@ -6,6 +6,7 @@ import { uploadSessionView, deleteSessionViews } from "@/lib/session-views";
 import { keypointStatus, isSideOnly } from "@/lib/coords-3d";
 import type { Dog, Keypoint3D, MeasurementSession, SessionView, ViewClick, ViewType } from "@/types";
 import type { ManualMetrics } from "@/lib/body-metrics";
+import type { WheelchairDesign } from "@/lib/wheelchair";
 
 // マットPDF生成（印刷用）が参照する標準サイズ。セッション作成時に固定値で入れる
 const STANDARD_MAT_WIDTH_CM = 84;
@@ -30,6 +31,7 @@ export type KarteSession = {
   keypoints: Keypoint3D[];
   clicks: ViewClick[];
   manualMetrics: ManualMetrics | null;
+  wheelchairDesign: WheelchairDesign | null;
 };
 
 // 新しい採寸セッションを作る（採寸開始・カルテの「新しい採寸を始める」から使う）
@@ -95,6 +97,7 @@ export function useKarte(dogId: string, sessionId: string | null) {
     keypoints: row.keypoints_3d,
     clicks: row.keypoints_3d.flatMap(k => k.view_clicks),
     manualMetrics: row.manual_metrics ?? null,
+    wheelchairDesign: row.wheelchair_design ?? null,
   };
 
   const sessions: KarteSessionSummary[] = rows.map(r => ({
@@ -166,5 +169,18 @@ export function useKarte(dogId: string, sessionId: string | null) {
     return err.message;
   }
 
-  return { dog, session, sessions, loading, error, reload, addPhoto, replacePhoto, deleteSession, saveManualMetrics };
+  // 車椅子の設計値を保存（画面側で先に反映済みなので再読み込みはしない）
+  async function saveWheelchairDesign(sessionId: string, value: WheelchairDesign): Promise<string | null> {
+    const { error: err } = await supabase
+      .from("measurement_sessions")
+      .update({ wheelchair_design: value })
+      .eq("id", sessionId);
+    if (!err) return null;
+    if (/wheelchair_design/.test(err.message)) {
+      return "設計値を保存する列が DB にありません。supabase/migrations/20261018_add_wheelchair_design.sql を実行してください";
+    }
+    return err.message;
+  }
+
+  return { dog, session, sessions, loading, error, reload, addPhoto, replacePhoto, deleteSession, saveManualMetrics, saveWheelchairDesign };
 }

@@ -69,10 +69,10 @@ function ViewSettingsPage() {
     }
   }
 
-  // 真上ビューで頭が右向きのときは X 軸を反転しない
+  // 真上ビューで頭が右向きのときは左右が逆に写る（頭が画像の右、犬の右側が画像の下）ので、X・Y とも反転しない
   function topAxisFlip() {
     return activeView?.view_type === "top" && topHeadDir === "right"
-      ? { px_inverted: false }
+      ? { px_inverted: false, py_inverted: false }
       : undefined;
   }
 

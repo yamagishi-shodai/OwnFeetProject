@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -15,6 +15,9 @@ import { DogInfoForm, type DogPatch } from "@/components/dogs/DogInfoForm";
 import { AnnotatedViewImage } from "./AnnotatedViewImage";
 import { DefaultViewImage } from "./DefaultViewImage";
 import { BodyMetricsCard } from "./BodyMetricsCard";
+import { WheelchairDesignCard } from "./WheelchairDesignCard";
+import { buildOverlayPhotos } from "@/lib/photo-overlay";
+import { WHEELCHAIR_KEYS, estimateWheelchair, resolveWheelchair, placeWheelchair, type WheelchairDesign, type WheelchairValues } from "@/lib/wheelchair";
 import type { KarteSession } from "@/hooks/useKarte";
 import { VIEW_LABELS } from "@/types";
 import type { ViewType } from "@/types";
@@ -37,11 +40,12 @@ type Props = {
   // 下書きで基本情報が初めて入力されたとき（犬とカルテを作る）
   onCreateDog?: (patch: DogPatch) => Promise<void>;
   onSaveManual: (sessionId: string, value: ManualMetrics) => Promise<string | null>;
+  onSaveWheelchair?: (sessionId: string, value: WheelchairDesign) => Promise<string | null>;
   busy?: boolean;
 };
 
 // 採寸カルテ: 左に点入りの写真（なければ撮影ボタン）、右に3Dビュー、下に編集できる基本情報
-export function Karte({ dogId, session, onAddPhoto, onReplacePhoto, onNewSession, onCreateDog, onSaveManual, busy }: Props) {
+export function Karte({ dogId, session, onAddPhoto, onReplacePhoto, onNewSession, onCreateDog, onSaveManual, onSaveWheelchair, busy }: Props) {
   const router = useRouter();
   const [confirmFor, setConfirmFor] = useState<ViewType | null>(null);
   const [captureFor, setCaptureFor] = useState<ViewType | null>(null);
@@ -65,19 +69,67 @@ export function Karte({ dogId, session, onAddPhoto, onReplacePhoto, onNewSession
     setManualError(await onSaveManual(session.id, next));
   }
   const hasMeasurement = keypoints.some(k => keypointStatus(k).complete);
+  // 3D ビューの真横・真上で重ねる写真（位置合わせは補正前の点で行う）
+  const overlayPhotos = useMemo(
+    () => (session ? buildOverlayPhotos(session.views, session.clicks, session.keypoints) : {}),
+    [session]
+  );
 
-  async function handleCapture(file: File) {
-    const vt = captureFor;
-    setCaptureFor(null);
-    if (!vt) return;
+  // 車椅子設計: 実測値で補正した点から自動計算し、手入力の設計値で上書きする
+  const [wheelchairDesign, setWheelchairDesign] = useState<WheelchairDesign>(session?.wheelchairDesign ?? {});
+  const [wheelchairError, setWheelchairError] = useState<string | null>(null);
+  const wheelchairEstimated = useMemo(
+    () => (hasMeasurement ? estimateWheelchair(displayKeypoints) : null),
+    [hasMeasurement, displayKeypoints]
+  );
+  const wheelchair = useMemo(
+    () => wheelchairEstimated && placeWheelchair(displayKeypoints, resolveWheelchair(wheelchairEstimated, wheelchairDesign)),
+    [wheelchairEstimated, displayKeypoints, wheelchairDesign]
+  );
+  // 各項目の「自動」の値。車輪径・横フレーム高さは、手で変えたフレーム高さなどに合わせて計算し直した値を出す
+  const wheelchairAuto = useMemo(() => {
+    if (!wheelchairEstimated) return null;
+    const out = { ...wheelchairEstimated } as WheelchairValues;
+    for (const k of WHEELCHAIR_KEYS) out[k] = resolveWheelchair(wheelchairEstimated, { ...wheelchairDesign, [k]: null })[k];
+    return out;
+  }, [wheelchairEstimated, wheelchairDesign]);
+
+  // スライダーは動かすたびに変わるので、画面にはすぐ反映し、保存は止まってから少し待って1回だけ行う
+  const wheelchairSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingWheelchairSave = useRef<(() => void) | null>(null);
+  function handleWheelchairChange(next: WheelchairDesign) {
+    setWheelchairDesign(next);
+    if (!session || !onSaveWheelchair) return;
+    if (wheelchairSaveTimer.current) clearTimeout(wheelchairSaveTimer.current);
+    const sessionId = session.id;
+    pendingWheelchairSave.current = () => { onSaveWheelchair(sessionId, next).then(setWheelchairError); };
+    wheelchairSaveTimer.current = setTimeout(() => {
+      pendingWheelchairSave.current?.();
+      pendingWheelchairSave.current = null;
+    }, 600);
+  }
+  // 保存待ちのままページを離れても失わないよう、その場で保存する
+  useEffect(() => () => {
+    if (wheelchairSaveTimer.current) clearTimeout(wheelchairSaveTimer.current);
+    pendingWheelchairSave.current?.();
+  }, []);
+
+  // カメラで撮影した、またはライブラリから選んだ写真を登録する
+  async function handlePhoto(vt: ViewType, file: File) {
     setUploading(true);
     setUploadError(null);
     const { sessionId, error } = await (replacing ? onReplacePhoto : onAddPhoto)(vt, file);
     setReplacing(false);
     setUploading(false);
     if (error || !sessionId) { setUploadError(error ?? "アップロードに失敗しました"); return; }
-    // 撮影したらそのビューの設定ページ（スケール設定 → 点の配置）へ
+    // 登録したらそのビューの設定ページ（スケール設定 → 点の配置）へ
     router.push(`/sessions/${sessionId}/3d?view=${vt}`);
+  }
+
+  function handleCapture(file: File) {
+    const vt = captureFor;
+    setCaptureFor(null);
+    if (vt) handlePhoto(vt, file);
   }
 
   return (
@@ -86,6 +138,7 @@ export function Karte({ dogId, session, onAddPhoto, onReplacePhoto, onNewSession
         <CameraConfirmDialog
           guide={CAPTURE_GUIDES[confirmFor]}
           onConfirm={() => { setCaptureFor(confirmFor); setConfirmFor(null); }}
+          onPickFile={file => { const vt = confirmFor; setConfirmFor(null); handlePhoto(vt, file); }}
           onCancel={() => { setConfirmFor(null); setReplacing(false); }}
         />
       )}
@@ -139,7 +192,7 @@ export function Karte({ dogId, session, onAddPhoto, onReplacePhoto, onNewSession
                   onClick={() => setConfirmFor(vt)}
                   disabled={uploading || busy}
                 >
-                  画像を撮影する
+                  画像を登録する
                 </Button>
               </div>
             );
@@ -163,6 +216,7 @@ export function Karte({ dogId, session, onAddPhoto, onReplacePhoto, onNewSession
             keypoints={displayKeypoints}
             frameKeypoints={keypoints}
             adoptedMetrics={adoptedKeys}
+            photos={overlayPhotos}
             selectedLabel=""
             className="w-full"
             style={{ height: "min(70vh, 640px)" }}
@@ -178,6 +232,27 @@ export function Karte({ dogId, session, onAddPhoto, onReplacePhoto, onNewSession
         <h2 className="text-sm font-bold text-ink-dark">基本情報</h2>
         <DogInfoForm key={dogId ?? "draft"} dogId={dogId} onCreate={onCreateDog} />
       </Card>
+
+      {/* 基本情報の下: 車椅子設計 */}
+      <WheelchairDesignCard
+        estimated={wheelchairAuto}
+        design={wheelchairDesign}
+        onChange={handleWheelchairChange}
+        frame={wheelchair?.frame ?? null}
+        preview={
+          <KeypointViewer3D
+            keypoints={displayKeypoints}
+            frameKeypoints={keypoints}
+            adoptedMetrics={adoptedKeys}
+            photos={overlayPhotos}
+            wheelchair={wheelchair}
+            selectedLabel=""
+            className="w-full"
+            style={{ height: "min(60vh, 520px)" }}
+          />
+        }
+        saveError={wheelchairError}
+      />
     </div>
   );
 }

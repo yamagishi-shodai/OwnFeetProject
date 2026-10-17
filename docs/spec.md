@@ -80,6 +80,7 @@ erDiagram
         numeric marker_size_cm
         text notes
         jsonb manual_metrics
+        jsonb wheelchair_design
         timestamptz created_at
     }
 
@@ -472,7 +473,7 @@ Z- = 下
 
 | ビュー | px_axis | px_inverted | py_axis | py_inverted |
 |---|---|---|---|---|
-| top（真上） | x_cm | true | y_cm | false |
+| top（真上） | x_cm | true | y_cm | true |
 | side_left（左側面） | x_cm | true | z_cm | true |
 | side_right（右側面） | x_cm | false | z_cm | true |
 | front（正面） | y_cm | false | z_cm | true |
@@ -573,7 +574,7 @@ t = (targetZ - C.z) / d.z
    relX = world.y - (5.0 + mat_height_cm / 2)  // 奥行き → 体前後(X軸)
    relY = world.x - (5.0 + mat_width_cm  / 2)  // 幅方向 → 体左右(Y軸)
    corrected_x = -relX   // top view: px_inverted=true
-   corrected_y =  relY   // top view: py_inverted=false
+   corrected_y = -relY   // top view: py_inverted=true
 4. keypoints_3d の x_cm, y_cm を更新
 ```
 

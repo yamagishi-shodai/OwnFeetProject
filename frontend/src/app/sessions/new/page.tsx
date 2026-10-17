@@ -99,7 +99,7 @@ function DraftKarte() {
       <div>
         <h1 className="text-xl font-bold text-ink-dark">新しいカルテ</h1>
         <p className="text-xs text-ink-muted mt-0.5">
-          基本情報を入力するか写真を撮影すると、自動でカルテが保存されます
+          基本情報を入力するか写真を登録すると、自動でカルテが保存されます
         </p>
       </div>
 

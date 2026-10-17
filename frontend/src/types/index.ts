@@ -1,4 +1,5 @@
 import type { ManualMetrics } from "@/lib/body-metrics";
+import type { WheelchairDesign } from "@/lib/wheelchair";
 
 // ── ドメインモデル ─────────────────────────────────────────────
 
@@ -36,6 +37,8 @@ export type MeasurementSession = {
   notes: string | null;
   // 採寸値の実測値と 3D への採用フラグ（supabase/migrations/20261017_add_manual_metrics.sql）
   manual_metrics?: ManualMetrics | null;
+  // 車椅子設計の手入力値（supabase/migrations/20261018_add_wheelchair_design.sql）
+  wheelchair_design?: WheelchairDesign | null;
   created_at: string;
 };
 

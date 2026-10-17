@@ -8,6 +8,9 @@ import { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js"
 import type { Keypoint3D } from "@/types";
 import { keypointStatus, midlineY } from "@/lib/coords-3d";
 import { computeBodyMetrics, type BodyMetrics, type MetricKey } from "@/lib/body-metrics";
+import type { WheelchairPlacement } from "@/lib/wheelchair";
+import { WheelchairModel } from "./WheelchairModel";
+import { photoUV, type OverlayKind, type OverlayPhoto } from "@/lib/photo-overlay";
 
 // ── 犬の骨格ライン定義 ─────────────────────────────────────────
 const SKELETON_EDGES: [string, string][] = [
@@ -270,13 +273,70 @@ function Dimensions({ metrics, adopted }: { metrics: BodyMetrics; adopted: Metri
   );
 }
 
+// ── 写真の重ね合わせ（真横・真上の視点） ─────────────────────────
+// 写真を「画素 → 3D」の変換で置いた板として描く。点より奥（真横）・地面の下（真上）に置き、点が手前に見えるようにする
+function PhotoPlane({ photo, depth }: { photo: OverlayPhoto; depth: number }) {
+  const [texture, setTexture] = useState<THREE.Texture | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin("anonymous");
+    loader.load(photo.url, t => {
+      if (!alive) { t.dispose(); return; }
+      t.colorSpace = THREE.SRGBColorSpace;
+      setTexture(t);
+    });
+    return () => { alive = false; };
+  }, [photo.url]);
+  useEffect(() => () => { texture?.dispose(); }, [texture]);
+
+  const geometry = useMemo(() => {
+    const img = texture?.image as { width?: number; height?: number } | undefined;
+    if (!img?.width || !img.height) return null;
+    const { width: w, height: h } = img;
+    // 画像の四隅（左上・右上・左下・右下）を DB 座標 → Three.js 座標へ
+    const corners = ([[0, 0], [w, 0], [0, h], [w, h]] as const).map(([px, py]) => {
+      const [u, v] = photoUV(photo.fit, px, py);
+      return photo.kind === "side" ? toThree(u, depth, v) : toThree(u, v, depth);
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(corners.flat(), 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute([0, 1, 1, 1, 0, 0, 1, 0], 2));
+    g.setIndex([0, 2, 1, 1, 2, 3]);
+    return g;
+  }, [texture, photo.fit, photo.kind, depth]);
+  useEffect(() => () => { geometry?.dispose(); }, [geometry]);
+
+  if (!texture || !geometry) return null;
+  return (
+    <mesh geometry={geometry} renderOrder={-1}>
+      <meshBasicMaterial map={texture} side={THREE.DoubleSide} transparent opacity={0.85} depthWrite={false} toneMapped={false} />
+    </mesh>
+  );
+}
+
 // ── メインシーン ──────────────────────────────────────────────
 // ── 点の広がりに合わせてカメラを自動で引く ──────────────────────
 // 点群を包む球（中心 center・半径 radius）が縦横どちらの画角にも収まる距離に置く
+type ViewMode = "free" | OverlayKind;
 const VIEW_DIR = new THREE.Vector3(40, 30, -50).normalize(); // -Z 側から見下ろす（X+ が画面左）
 const FIT_MARGIN = 1.0;
+// 真横・真上は写真（ほぼ正射影）と重なるよう、画角を極端に狭くして遠くから見る
+const FREE_FOV = 50;
+const FLAT_FOV = 4;
 
-function FitCamera({ cx, cy, cz, radius }: { cx: number; cy: number; cz: number; radius: number }) {
+// 視点ごとのカメラの向き（注視点 → カメラ）
+function viewDirection(mode: ViewMode, topImageUp: THREE.Vector3): THREE.Vector3 {
+  if (mode === "side") return new THREE.Vector3(0, 0, -1);  // 犬の左側（Y_db 負側）から。頭（X+）が画面左
+  // 真上: 真下を向く。写真の上方向が画面の上になるよう、ごくわずかに写真の下側へずらす
+  if (mode === "top") return new THREE.Vector3(0, 1, 0).addScaledVector(topImageUp, -0.002).normalize();
+  return VIEW_DIR.clone();
+}
+
+function FitCamera({ cx, cy, cz, radius, dir, fov, fitKey }: {
+  cx: number; cy: number; cz: number; radius: number; dir: THREE.Vector3; fov: number; fitKey: number;
+}) {
   const get = useThree(s => s.get);
   const controlsReady = useThree(s => !!s.controls);
   const width = useThree(s => s.size.width);
@@ -287,51 +347,61 @@ function FitCamera({ cx, cy, cz, radius }: { cx: number; cy: number; cz: number;
     if (width <= 0 || height <= 0) return;
     const camera = get().camera as THREE.PerspectiveCamera;
     const controls = get().controls as unknown as { target: THREE.Vector3; update: () => void } | null;
-    const vFov = THREE.MathUtils.degToRad(camera.fov);
+    camera.fov = fov;
+    const vFov = THREE.MathUtils.degToRad(fov);
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * (width / Math.max(height, 1)));
     const dist = (radius / Math.sin(Math.min(vFov, hFov) / 2)) * FIT_MARGIN;
     if (!Number.isFinite(dist)) return;
     const target = new THREE.Vector3(cx, cy, cz);
 
-    camera.position.copy(target).addScaledVector(VIEW_DIR, dist);
+    camera.position.copy(target).addScaledVector(dir, dist);
     camera.near = Math.max(0.1, dist / 100);
     camera.far = dist * 20;
     camera.updateProjectionMatrix();
     camera.lookAt(target);
     if (controls) { controls.target.copy(target); controls.update(); }
-  }, [get, controlsReady, cx, cy, cz, radius, width, height]);
+  }, [get, controlsReady, cx, cy, cz, radius, width, height, dir, fov, fitKey]);
 
   return null;
 }
 
-function Scene({ keypoints, selectedLabel, center, radius, groundY, showLabels, metrics, midY, showSolid, adoptedMetrics }: {
+function Scene({ keypoints, selectedLabel, center, radius, groundY, showLabels, metrics, midY, showSolid, adoptedMetrics, wheelchair,
+  photo, photoDepth, camDir, fov, fitKey, showDog }: {
   keypoints: Keypoint3D[]; selectedLabel: string; center: [number, number, number]; radius: number;
   groundY: number; showLabels: boolean; metrics: BodyMetrics | null; midY: number; showSolid: boolean;
-  adoptedMetrics: MetricKey[];
+  adoptedMetrics: MetricKey[]; wheelchair: WheelchairPlacement | null;
+  photo: OverlayPhoto | null; photoDepth: number; camDir: THREE.Vector3; fov: number; fitKey: number;
+  showDog: boolean;
 }) {
   return (
     <>
       <ambientLight intensity={1.2} />
       <directionalLight position={[20, 30, 20]} intensity={0.8} />
 
-      <Ground center={center} radius={radius} groundY={groundY} />
+      {/* 写真を重ねるときは地面を消す（写真が隠れないように） */}
+      {photo ? <PhotoPlane photo={photo} depth={photoDepth} /> : <Ground center={center} radius={radius} groundY={groundY} />}
       {/* XYZ 軸は地面の中心（点群の真下）に置く */}
       <axesHelper args={[Math.max(10, radius * 0.5)]} position={[center[0], groundY, center[2]]} />
 
-      <SkeletonEdges keypoints={keypoints} midY={midY} />
-      {showSolid && <SolidBody keypoints={keypoints} midY={midY} />}
-      {metrics && <Dimensions metrics={metrics} adopted={adoptedMetrics} />}
-
-      {keypoints.map(kp => (
-        <KpSphere key={kp.id} kp={kp} selected={kp.label === selectedLabel} scale={radius} showLabel={showLabels} midY={midY} />
-      ))}
+      {/* 犬（点・骨格・ソリッド・寸法線）。OFF にすると車椅子だけを見られる */}
+      {showDog && (
+        <>
+          <SkeletonEdges keypoints={keypoints} midY={midY} />
+          {showSolid && <SolidBody keypoints={keypoints} midY={midY} />}
+          {metrics && <Dimensions metrics={metrics} adopted={adoptedMetrics} />}
+          {keypoints.map(kp => (
+            <KpSphere key={kp.id} kp={kp} selected={kp.label === selectedLabel} scale={radius} showLabel={showLabels} midY={midY} />
+          ))}
+        </>
+      )}
+      {wheelchair && <WheelchairModel placement={wheelchair} />}
 
       <OrbitControls
         makeDefault
         minDistance={radius * 0.3}
-        maxDistance={radius * 15}
+        maxDistance={radius * 15 * (FREE_FOV / fov)}
       />
-      <FitCamera cx={center[0]} cy={center[1]} cz={center[2]} radius={radius} />
+      <FitCamera cx={center[0]} cy={center[1]} cz={center[2]} radius={radius} dir={camDir} fov={fov} fitKey={fitKey} />
 
       <GizmoHelper alignment="bottom-right" margin={[72, 72]}>
         <GizmoViewport
@@ -354,12 +424,22 @@ type Props = {
   // 画角（カメラ・地面グリッドの範囲）を決める点。実測値の反映で点が動いても画角を変えないよう、
   // 補正前の点を渡す。省略時は keypoints
   frameKeypoints?: Keypoint3D[];
+  // 重ねて表示する車椅子（設計値から計算した位置）
+  wheelchair?: WheelchairPlacement | null;
+  // 真横・真上の視点で重ねる写真
+  photos?: Partial<Record<OverlayKind, OverlayPhoto>>;
 };
 
-export function KeypointViewer3D({ keypoints, selectedLabel, className = "", style, adoptedMetrics = [], frameKeypoints }: Props) {
+export function KeypointViewer3D({ keypoints, selectedLabel, className = "", style, adoptedMetrics = [], frameKeypoints, wheelchair = null, photos = {} }: Props) {
   const [showLabels, setShowLabels] = useState(false);
   const [showDims, setShowDims] = useState(true);
   const [showSolid, setShowSolid] = useState(true);
+  const [showWheelchair, setShowWheelchair] = useState(true);
+  const [showDog, setShowDog] = useState(true);
+  const [viewMode, setViewMode] = useState<ViewMode>("free");
+  const [showPhoto, setShowPhoto] = useState(true);
+  // 同じ視点ボタンをもう一度押したときも画角を戻せるよう、押すたびに増やす
+  const [fitKey, setFitKey] = useState(0);
   const metrics = computeBodyMetrics(keypoints);
 
   // 画角用の点（3軸そろったもの）を包む箱の中心と半径を Three.js 座標で求め、カメラをそこに合わせる。
@@ -382,6 +462,23 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
     radius = Math.max(10, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2);
   }
 
+  const modePhoto = viewMode === "free" ? null : photos[viewMode] ?? null;
+  const photo = showPhoto ? modePhoto : null;
+  // 写真の板の位置: 真横は点より奥（カメラは Y_db 負側）、真上は地面の少し下
+  const maxY = pts.length ? Math.max(...pts.map(p => p[2])) : 0;
+  const photoDepth = viewMode === "side" ? maxY + radius * 0.5 : groundY - 0.5;
+  const topSv = photos.top?.fit.sv ?? 1;
+  const camDir = useMemo(
+    () => viewDirection(viewMode, new THREE.Vector3(0, 0, -topSv)), // 写真の上 = pixel_y が減る向き
+    [viewMode, topSv]
+  );
+
+  function selectView(mode: ViewMode) {
+    setViewMode(mode);
+    setShowPhoto(true);
+    setFitKey(k => k + 1);
+  }
+
   return (
     <div
       className={`relative rounded-2xl overflow-hidden bg-warm-gutter ${className}`}
@@ -398,6 +495,10 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
         <Scene
           keypoints={keypoints} selectedLabel={selectedLabel} center={center} radius={radius}
           groundY={groundY} showLabels={showLabels} metrics={showDims ? metrics : null} midY={midY} showSolid={showSolid} adoptedMetrics={adoptedMetrics}
+          wheelchair={showWheelchair ? wheelchair : null}
+          photo={photo} photoDepth={photoDepth} camDir={camDir}
+          fov={viewMode === "free" ? FREE_FOV : FLAT_FOV} fitKey={fitKey}
+          showDog={!wheelchair || showDog}
         />
       </Canvas>
 
@@ -433,6 +534,59 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
         >
           ソリッド {showSolid ? "ON" : "OFF"}
         </button>
+        {wheelchair && (
+          <button
+            type="button"
+            onClick={() => setShowWheelchair(v => !v)}
+            aria-pressed={showWheelchair}
+            className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
+              ${showWheelchair ? "bg-[#556E97] text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
+          >
+            車椅子 {showWheelchair ? "ON" : "OFF"}
+          </button>
+        )}
+        {wheelchair && (
+          <button
+            type="button"
+            onClick={() => setShowDog(v => !v)}
+            aria-pressed={showDog}
+            className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
+              ${showDog ? "bg-[#8a7a6a] text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
+          >
+            犬 {showDog ? "ON" : "OFF"}
+          </button>
+        )}
+
+        {/* 視点の切り替え。真横・真上では写真を重ねられる */}
+        <div className="pointer-events-auto mt-2 flex rounded overflow-hidden border border-white/70">
+          {([["free", "3D"], ["side", "真横"], ["top", "真上"]] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => selectView(mode)}
+              aria-pressed={viewMode === mode}
+              className={`px-2 py-1 font-bold transition-colors
+                ${viewMode === mode ? "bg-ink-primary text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {viewMode !== "free" && (modePhoto ? (
+          <button
+            type="button"
+            onClick={() => setShowPhoto(v => !v)}
+            aria-pressed={showPhoto}
+            className={`pointer-events-auto px-2 py-1 rounded font-bold transition-colors
+              ${showPhoto ? "bg-[#cfaa55] text-white" : "bg-white/70 text-ink-muted hover:bg-white"}`}
+          >
+            写真 {showPhoto ? "ON" : "OFF"}
+          </button>
+        ) : (
+          <span className="px-2 py-1 rounded bg-white/70 text-ink-muted">
+            {viewMode === "side" ? "側面" : "真上"}の写真に点が2つ以上必要です
+          </span>
+        ))}
       </div>
 
       {adoptedMetrics.length > 0 && (

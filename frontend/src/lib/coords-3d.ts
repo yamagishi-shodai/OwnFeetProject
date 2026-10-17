@@ -19,7 +19,7 @@ type AxisMap = {
 //
 // 真上ビュー → XY平面（水平面）
 //   pixel_x (横): 頭が画像左 → 小pixel_x=頭=X+ → px_inverted=true
-//   pixel_y (縦): 犬の右側が画像下 → 大pixel_y=Y+ → py_inverted=false
+//   pixel_y (縦): 頭が左の犬を真上から見ると、犬の右側は画像の上に写る → 小pixel_y=Y+ → py_inverted=true
 //
 // 左側面ビュー → XZ平面（体長×高さ）
 //   犬の左側から撮ると頭は画像左に写る（右側からなら画像右）
@@ -27,7 +27,7 @@ type AxisMap = {
 //   pixel_y (縦): 上が画像上 → 小pixel_y=Z+ → py_inverted=true
 
 export const VIEW_AXIS_MAP: Record<ViewType, AxisMap> = {
-  top:        { px_axis: "x_cm", py_axis: "y_cm", px_inverted: true,  py_inverted: false },
+  top:        { px_axis: "x_cm", py_axis: "y_cm", px_inverted: true,  py_inverted: true  },
   side_left:  { px_axis: "x_cm", py_axis: "z_cm", px_inverted: true,  py_inverted: true  },
   side_right: { px_axis: "x_cm", py_axis: "z_cm", px_inverted: false, py_inverted: true  },
   front:      { px_axis: "y_cm", py_axis: "z_cm", px_inverted: false, py_inverted: true  },

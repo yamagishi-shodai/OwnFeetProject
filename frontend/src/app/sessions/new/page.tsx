@@ -91,7 +91,7 @@ function NewSessionForm() {
       return;
     }
 
-    const { error: viewErr } = await uploadSessionView(session.id, "top", capturedFile);
+    const { error: viewErr } = await uploadSessionView(session.id, "side_right", capturedFile);
     if (viewErr) {
       setError(viewErr);
       setSaving(false);

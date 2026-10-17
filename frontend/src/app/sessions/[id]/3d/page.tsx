@@ -17,7 +17,7 @@ const KeypointViewer3D = dynamic(
   { ssr: false, loading: () => <div className="w-full h-full flex items-center justify-center text-sm text-ink-muted">3Dビューを読み込み中…</div> }
 );
 
-const VIEW_ORDER: ViewType[] = ["top", "side_right"];
+const VIEW_ORDER: ViewType[] = ["side_right", "top"];
 type PanelMode = "place" | "view3d";
 
 export default function ThreeDPage() {
@@ -266,8 +266,8 @@ export default function ThreeDPage() {
               ) : (
                 <>
                   <p>① 部位を選択 → 画像上をクリックで点を配置</p>
-                  <p>② 真上ビュー → X(体長)・Y(体幅) 確定</p>
-                  <p>③ 右側面ビュー → X(体長)・Z(高さ) 確定</p>
+                  <p>② 右側面ビュー → X(体長)・Z(高さ) 確定</p>
+                  <p>③ 真上ビュー → X(体長)・Y(体幅) 確定</p>
                   <p>④ 「3Dビュー」タブで確認・回転・ズーム</p>
                 </>
               )}
@@ -337,7 +337,7 @@ function View3DPanel({
 
   const toggle = (vt: string) => setVisible(prev => ({ ...prev, [vt]: !prev[vt] }));
 
-  const photoViews = (["top", "side_right"] as const)
+  const photoViews = (["side_right", "top"] as const)
     .map(vt => ({ vt, view: views.find(v => v.view_type === vt) }))
     .filter(({ view }) => view?.image_url);
 

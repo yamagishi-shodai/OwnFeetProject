@@ -94,151 +94,154 @@ function KartePrintPage() {
         </div>
       </div>
 
-      {/* A4 の紙 */}
-      <article className="w-[210mm] max-w-full bg-white text-ink-dark shadow-md p-[12mm] flex flex-col gap-5
-        print:w-auto print:max-w-none print:shadow-none print:p-0">
+      {/* A4 の紙。スマホでも縮めず A4 幅のまま（はみ出す分は横スクロール）。
+          印刷時は A4 幅 − 左右の余白 12mm × 2 = 186mm に固定する（スマホの印刷で画面幅に合わせて折り返さないように） */}
+      <div className="w-full overflow-x-auto print:overflow-visible">
+        <article className="mx-auto w-[210mm] bg-white text-ink-dark shadow-md p-[12mm] flex flex-col gap-5
+          print:w-[186mm] print:shadow-none print:p-0">
 
-        {/* ── 1ページ目: 基本情報・写真・採寸値 ── */}
-        <header className="flex items-end justify-between gap-4 border-b-2 border-ink-dark pb-2">
-          <div>
-            <p className="text-[10px] text-ink-muted">犬用車椅子 採寸カルテ</p>
-            <h1 className="text-2xl font-bold">{dog.name}</h1>
-          </div>
-          <div className="text-right text-[11px] text-ink-muted">
-            <p>採寸日: {formatDate(session.created_at)}</p>
-            <p>出力日: {formatDate(new Date())}</p>
-          </div>
-        </header>
-
-        <Section title="基本情報">
-          <table className="w-full text-xs">
-            <tbody>
-              <InfoRow label="名前" value={dog.name} />
-              <InfoRow label="犬種" value={dog.breed} />
-              <InfoRow label="体重" value={dog.weight_kg != null ? `${dog.weight_kg} kg` : null} />
-              <InfoRow
-                label="生年月日"
-                value={dog.birth_date ? `${formatDate(dog.birth_date)}（${ageText(dog.birth_date)}）` : null}
-              />
-              <InfoRow label="メモ" value={dog.notes} multiline />
-            </tbody>
-          </table>
-        </Section>
-
-        <Section title="写真">
-          {photos.length > 0 ? (
-            <div className="grid grid-cols-2 gap-3">
-              {photos.map(v => (
-                <AnnotatedViewImage key={v.id} view={v} keypoints={keypoints} clicks={session.clicks} />
-              ))}
+          {/* ── 1ページ目: 基本情報・写真・採寸値 ── */}
+          <header className="flex items-end justify-between gap-4 border-b-2 border-ink-dark pb-2">
+            <div>
+              <p className="text-[10px] text-ink-muted">犬用車椅子 採寸カルテ</p>
+              <h1 className="text-2xl font-bold">{dog.name}</h1>
             </div>
-          ) : <Empty />}
-        </Section>
+            <div className="text-right text-[11px] text-ink-muted">
+              <p>採寸日: {formatDate(session.created_at)}</p>
+              <p>出力日: {formatDate(new Date())}</p>
+            </div>
+          </header>
 
-        <Section title="採寸値">
-          {hasMeasurement ? (
-            <>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border-default text-ink-muted">
-                    <Th>項目</Th><Th right>推定値</Th><Th right>実測値</Th><Th right>推定との差</Th><Th>3D への採用</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {METRIC_DEFS.map(def => {
-                    const est = estimatedValue(metrics, def.key);
-                    const measured = manual?.[def.key] ?? null;
-                    return (
-                      <tr key={def.key} className="border-b border-border-light">
-                        <Td>
-                          <span className="font-bold">{def.title}</span>
-                          <span className="ml-1 text-[10px] text-ink-muted">（{def.note}）</span>
-                        </Td>
-                        <Td right>{est != null ? `${fmt(est)} cm` : "—"}</Td>
-                        <Td right>{measured != null ? `${fmt(measured)} cm` : "—"}</Td>
-                        <Td right>
-                          {measured != null && est != null ? `${measured - est >= 0 ? "+" : ""}${fmt(measured - est)} cm` : "—"}
-                        </Td>
-                        <Td>{adopted[def.key] != null ? "採用" : "—"}</Td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <p className="mt-1 text-[10px] text-ink-muted">
-                {keypoints.filter(k => keypointStatus(k).complete).length} 部位確定。推定値は写真に置いた点から計算した値
-              </p>
-            </>
-          ) : <Empty />}
-        </Section>
+          <Section title="基本情報">
+            <table className="w-full text-xs">
+              <tbody>
+                <InfoRow label="名前" value={dog.name} />
+                <InfoRow label="犬種" value={dog.breed} />
+                <InfoRow label="体重" value={dog.weight_kg != null ? `${dog.weight_kg} kg` : null} />
+                <InfoRow
+                  label="生年月日"
+                  value={dog.birth_date ? `${formatDate(dog.birth_date)}（${ageText(dog.birth_date)}）` : null}
+                />
+                <InfoRow label="メモ" value={dog.notes} multiline />
+              </tbody>
+            </table>
+          </Section>
 
-        {/* ── 2ページ目: 3D・車椅子設計 ── */}
-        <div className="break-before-page flex flex-col gap-5">
-          <Section title="3D モデル">
-            {hasMeasurement ? (
+          <Section title="写真">
+            {photos.length > 0 ? (
               <div className="grid grid-cols-2 gap-3">
-                <Figure caption={Object.keys(adopted).length ? "犬（実測値で補正）" : "犬"} src={dogImage} />
-                {chair?.placement && <Figure caption="犬と車椅子" src={chairImage} />}
+                {photos.map(v => (
+                  <AnnotatedViewImage key={v.id} view={v} keypoints={keypoints} clicks={session.clicks} />
+                ))}
               </div>
             ) : <Empty />}
           </Section>
 
-          <Section title="車椅子設計（後脚サポート型・2輪）">
-            {chair ? (
+          <Section title="採寸値">
+            {hasMeasurement ? (
               <>
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-border-default text-ink-muted">
-                      <Th>項目</Th><Th right>自動計算</Th><Th right>設計値</Th><Th right>使用値</Th>
+                      <Th>項目</Th><Th right>推定値</Th><Th right>実測値</Th><Th right>推定との差</Th><Th>3D への採用</Th>
                     </tr>
                   </thead>
                   <tbody>
-                    {WHEELCHAIR_KEYS.map(k => {
-                      const auto = chair.auto[k];
-                      const set = design?.[k] ?? null;
-                      const used = chair.used[k];
+                    {METRIC_DEFS.map(def => {
+                      const est = estimatedValue(metrics, def.key);
+                      const measured = manual?.[def.key] ?? null;
                       return (
-                        <tr key={k} className="border-b border-border-light">
+                        <tr key={def.key} className="border-b border-border-light">
                           <Td>
-                            <span className="font-bold">{WHEELCHAIR_DEFS[k].title}</span>
-                            <span className="ml-1 text-[10px] text-ink-muted">（{WHEELCHAIR_DEFS[k].note}）</span>
+                            <span className="font-bold">{def.title}</span>
+                            <span className="ml-1 text-[10px] text-ink-muted">（{def.note}）</span>
                           </Td>
-                          <Td right>{auto != null ? `${fmt(auto)} cm` : "—"}</Td>
-                          <Td right>{set != null ? `${fmt(set)} cm` : "—"}</Td>
-                          <Td right bold>{used != null ? `${fmt(used)} cm` : "—"}</Td>
+                          <Td right>{est != null ? `${fmt(est)} cm` : "—"}</Td>
+                          <Td right>{measured != null ? `${fmt(measured)} cm` : "—"}</Td>
+                          <Td right>
+                            {measured != null && est != null ? `${measured - est >= 0 ? "+" : ""}${fmt(measured - est)} cm` : "—"}
+                          </Td>
+                          <Td>{adopted[def.key] != null ? "採用" : "—"}</Td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
-                {frame && (
-                  <div className="mt-2 flex flex-col gap-0.5 text-[10px] text-ink-muted">
-                    <p><span className="font-bold text-ink-dark">垂直材長 {fmt(frame.verticalLength)} cm</span>（車輪が地面に接するよう自動計算）</p>
-                    <p>{frameSpecText()}</p>
-                    {frame.warnings.map(w => <p key={w} className="font-bold text-accent-red">⚠ {w}</p>)}
-                  </div>
-                )}
+                <p className="mt-1 text-[10px] text-ink-muted">
+                  {keypoints.filter(k => keypointStatus(k).complete).length} 部位確定。推定値は写真に置いた点から計算した値
+                </p>
               </>
             ) : <Empty />}
           </Section>
-        </div>
 
-        {/* ── 3ページ目: 部材一覧 ── */}
-        {frame && frame.pipeRecords.length > 0 && (
+          {/* ── 2ページ目: 3D・車椅子設計 ── */}
           <div className="break-before-page flex flex-col gap-5">
-            <Section title="パイプ一覧（切断寸法）">
-              <div className="flex flex-col gap-1"><PipeTable frame={frame} /></div>
+            <Section title="3D モデル">
+              {hasMeasurement ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <Figure caption={Object.keys(adopted).length ? "犬（実測値で補正）" : "犬"} src={dogImage} />
+                  {chair?.placement && <Figure caption="犬と車椅子" src={chairImage} />}
+                </div>
+              ) : <Empty />}
             </Section>
-            <Section title="接合部一覧（ジョイント）">
-              <div className="flex flex-col gap-1"><JointTable frame={frame} /></div>
+
+            <Section title="車椅子設計（後脚サポート型・2輪）">
+              {chair ? (
+                <>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border-default text-ink-muted">
+                        <Th>項目</Th><Th right>自動計算</Th><Th right>設計値</Th><Th right>使用値</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {WHEELCHAIR_KEYS.map(k => {
+                        const auto = chair.auto[k];
+                        const set = design?.[k] ?? null;
+                        const used = chair.used[k];
+                        return (
+                          <tr key={k} className="border-b border-border-light">
+                            <Td>
+                              <span className="font-bold">{WHEELCHAIR_DEFS[k].title}</span>
+                              <span className="ml-1 text-[10px] text-ink-muted">（{WHEELCHAIR_DEFS[k].note}）</span>
+                            </Td>
+                            <Td right>{auto != null ? `${fmt(auto)} cm` : "—"}</Td>
+                            <Td right>{set != null ? `${fmt(set)} cm` : "—"}</Td>
+                            <Td right bold>{used != null ? `${fmt(used)} cm` : "—"}</Td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {frame && (
+                    <div className="mt-2 flex flex-col gap-0.5 text-[10px] text-ink-muted">
+                      <p><span className="font-bold text-ink-dark">垂直材長 {fmt(frame.verticalLength)} cm</span>（車輪が地面に接するよう自動計算）</p>
+                      <p>{frameSpecText()}</p>
+                      {frame.warnings.map(w => <p key={w} className="font-bold text-accent-red">⚠ {w}</p>)}
+                    </div>
+                  )}
+                </>
+              ) : <Empty />}
             </Section>
           </div>
-        )}
 
-        <p className="text-[9px] text-ink-light">
-          ※ 寸法は写真から推定した採寸値にもとづく目安です。製作前に実際の体に合わせて確認してください
-        </p>
-      </article>
+          {/* ── 3ページ目: 部材一覧 ── */}
+          {frame && frame.pipeRecords.length > 0 && (
+            <div className="break-before-page flex flex-col gap-5">
+              <Section title="パイプ一覧（切断寸法）">
+                <div className="flex flex-col gap-1"><PipeTable frame={frame} /></div>
+              </Section>
+              <Section title="接合部一覧（ジョイント）">
+                <div className="flex flex-col gap-1"><JointTable frame={frame} /></div>
+              </Section>
+            </div>
+          )}
+
+          <p className="text-[9px] text-ink-light">
+            ※ 寸法は写真から推定した採寸値にもとづく目安です。製作前に実際の体に合わせて確認してください
+          </p>
+        </article>
+      </div>
 
       {/* 3D を画像にするための描画（画面外。画像ができたら消す） */}
       {hasMeasurement && (

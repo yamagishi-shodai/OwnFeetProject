@@ -462,6 +462,8 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
   const [showPhoto, setShowPhoto] = useState(true);
   // 同じ視点ボタンをもう一度押したときも画角を戻せるよう、押すたびに増やす
   const [fitKey, setFitKey] = useState(0);
+  const [fullscreen, setFullscreen] = useFullscreen();
+  const rootRef = useRef<HTMLDivElement>(null);
   const metrics = computeBodyMetrics(keypoints);
 
   // 画角用の点（3軸そろったもの）を包む箱の中心と半径を Three.js 座標で求め、カメラをそこに合わせる。
@@ -503,8 +505,11 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
 
   return (
     <div
-      className={`relative rounded-2xl overflow-hidden bg-warm-gutter ${className}`}
-      style={style}
+      ref={rootRef}
+      className={fullscreen
+        ? "fixed inset-0 z-[95] w-screen h-[100dvh] overflow-hidden bg-warm-gutter"
+        : `relative rounded-2xl overflow-hidden bg-warm-gutter ${className}`}
+      style={fullscreen ? undefined : style}
     >
       <Canvas
         // 初期位置は FitCamera が決める。-Z 側（Y_db 負側）から見て X+（頭方向）を画面左に向ける
@@ -625,6 +630,22 @@ export function KeypointViewer3D({ keypoints, selectedLabel, className = "", sty
             </div>
           )}
 
+          {/* 全画面の切り替え */}
+          <button
+            type="button"
+            onClick={() => setFullscreen(!fullscreen, rootRef.current)}
+            aria-pressed={fullscreen}
+            aria-label={fullscreen ? "全画面表示を終了" : "全画面表示"}
+            title={fullscreen ? "全画面表示を終了（Esc）" : "全画面表示"}
+            className="absolute top-3 right-3 w-9 h-9 rounded-lg bg-white/80 text-ink-dark hover:bg-white flex items-center justify-center shadow-sm"
+          >
+            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              {fullscreen
+                ? <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+                : <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />}
+            </svg>
+          </button>
+
           {/* 軸凡例 */}
           <div className="hidden sm:flex absolute top-3 right-16 flex-col gap-0.5 text-[11px] pointer-events-none">
             <span className="font-bold text-[#556E97]">X: 前後（体長）</span>
@@ -662,4 +683,44 @@ function LegendItem({ color, label, dim }: { color: string; label: string; dim?:
       <span className="text-ink-muted">{label}</span>
     </div>
   );
+}
+
+// 全画面表示。使えるブラウザでは Fullscreen API で画面いっぱいにし、
+// iPhone の Safari など要素の全画面に対応しないブラウザでは CSS（fixed）で画面を覆う。
+// Esc・ブラウザ側の操作で抜けたときも状態を戻し、表示中は後ろのページがスクロールしないようにする
+function useFullscreen(): [boolean, (on: boolean, el: HTMLElement | null) => void] {
+  const [on, setOn] = useState(false);
+
+  useEffect(() => {
+    const onChange = () => { if (!document.fullscreenElement) setOn(false); };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!on) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOn(false);
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    };
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = overflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [on]);
+
+  function set(next: boolean, el: HTMLElement | null) {
+    setOn(next);
+    if (next) {
+      el?.requestFullscreen?.().catch(() => { /* 使えなければ CSS の全画面のまま */ });
+    } else if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
+
+  return [on, set];
 }

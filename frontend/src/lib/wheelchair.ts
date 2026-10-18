@@ -188,7 +188,13 @@ export type JointRecord = {
   dirs: V3[];                 // 中心から各差し込み口への向き（元モデルの座標系、開き角で回す前）
 };
 
+// 側面フレームの主要な点（開き角で回したあと）。図面の寸法線に使う
+export type SideFramePoints = {
+  base: V3; front: V3; rear: V3; bottom: V3; braceStart: V3; braceEnd: V3; cross: V3;
+};
+
 export type WheelchairFrame = {
+  sides: SideFramePoints[];    // [左, 右]
   pipes: FramePipe[];
   joints: FrameJoint[];
   wheels: FrameWheel[];
@@ -267,7 +273,7 @@ export function buildWheelchairFrame(v: WheelchairValues): WheelchairFrame | nul
     warnings.push(`前方フレーム長は補強材の取り付け位置より長く（${(braceStartX + JOINT_R).toFixed(1)} cm 超）してください`);
   }
   if (verticalLength <= 0) {
-    return { pipes: [], joints: [], wheels: [], axles: [], pipeRecords: [], jointRecords: [], totalPipeLength: 0,
+    return { sides: [], pipes: [], joints: [], wheels: [], axles: [], pipeRecords: [], jointRecords: [], totalPipeLength: 0,
              verticalLength, wheelDiameter, warnings };
   }
 
@@ -277,6 +283,7 @@ export function buildWheelchairFrame(v: WheelchairValues): WheelchairFrame | nul
   const axles: { a: V3; b: V3 }[] = [];
   const rears: V3[] = [];
   const crosses: V3[] = [];
+  const sides: SideFramePoints[] = [];
   let sideRecords: PipeRecord[] = [];
   let sideJoints: JointRecord[] = [];
 
@@ -318,6 +325,10 @@ export function buildWheelchairFrame(v: WheelchairValues): WheelchairFrame | nul
 
     rears.push(R(rear));
     crosses.push(R(cross));
+    sides.push({
+      base: R(base), front: R(front), rear: R(rear), bottom: R(bottom),
+      braceStart: R(braceStart), braceEnd: R(braceEnd), cross: R(cross),
+    });
 
     // 部材一覧（回転しても長さ・角度は変わらないので、回転前の座標で左右1回だけ計算する）
     if (side === -1) {
@@ -369,7 +380,7 @@ export function buildWheelchairFrame(v: WheelchairValues): WheelchairFrame | nul
   for (const r of pipeRecords) if (r.cutLength <= 0) warnings.push(`パイプが短すぎます: ${r.name}`);
   const totalPipeLength = pipeRecords.reduce((a, r) => a + r.cutLength * r.count, 0);
 
-  return { pipes, joints, wheels, axles, pipeRecords, jointRecords, totalPipeLength, verticalLength, wheelDiameter, warnings };
+  return { sides, pipes, joints, wheels, axles, pipeRecords, jointRecords, totalPipeLength, verticalLength, wheelDiameter, warnings };
 }
 
 // 元モデルの csv_text と同じ形式（左右の部材は L_ / R_ に分けて1行ずつ、mm）

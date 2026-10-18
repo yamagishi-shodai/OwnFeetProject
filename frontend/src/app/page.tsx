@@ -19,9 +19,9 @@ export default function HomePage() {
       {/* ウェルカムバナー */}
       <Card className="flex flex-col gap-4">
         <div>
-          <h1 className="text-xl font-bold text-ink-dark">ようこそ、採寸プラットフォームへ</h1>
+          <h1 className="text-xl font-bold text-ink-dark">ようこそ、Own Feet Platformへ</h1>
           <p className="text-sm text-ink-muted mt-1">
-            基準物と写真から、犬の体のサイズを正確に記録・管理できます。
+            写真を撮るだけで、愛犬にぴったりの車椅子を。採寸から3Dモデル、車椅子の設計、カルテの出力までひとつの流れで行えます。
           </p>
         </div>
         <MeasurementSteps />

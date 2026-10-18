@@ -7,6 +7,7 @@ import {
   WHEELCHAIR_DEFS, WHEELCHAIR_KEYS, pipeRecordsCsv,
   type WheelchairDesign, type WheelchairFrame, type WheelchairKey, type WheelchairValues,
 } from "@/lib/wheelchair";
+import { wheelchairDxf } from "@/lib/wheelchair-dxf";
 import { JointTable, PipeTable, frameSpecText, mm } from "./WheelchairTables";
 
 // 接合部の部品の 3D 表示（three.js とブーリアン演算はブラウザでだけ読み込む）
@@ -83,12 +84,33 @@ export function WheelchairDesignCard({ estimated, design, onChange, frame, previ
 }
 
 function FrameSummary({ frame }: { frame: WheelchairFrame }) {
+  // 三面図（側面図・平面図・正面図、寸法線つき）を DXF（mm）で保存する
+  function downloadDxf() {
+    // 日本時間の日付（toISOString は UTC なので朝9時前は前日になる）
+    const d = new Date();
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const blob = new Blob([wheelchairDxf(frame, { date })], { type: "application/dxf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `wheelchair-drawing-${date}.dxf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="flex flex-col gap-1 rounded-xl bg-warm-sub px-3 py-2 text-[11px] text-ink-muted">
-      <p>
-        <span className="font-bold text-ink-dark">垂直材長 {frame.verticalLength.toFixed(1)} cm</span>
-        （車輪が地面に接するよう自動計算）
-      </p>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <p>
+          <span className="font-bold text-ink-dark">垂直材長 {frame.verticalLength.toFixed(1)} cm</span>
+          （車輪が地面に接するよう自動計算）
+        </p>
+        {frame.pipes.length > 0 && (
+          <button type="button" onClick={downloadDxf} className="text-xs font-bold text-accent-blue hover:underline shrink-0">
+            図面（DXF）をダウンロード
+          </button>
+        )}
+      </div>
       <p>{frameSpecText()}</p>
       {frame.warnings.map(w => (
         <p key={w} className="font-bold text-accent-red">⚠ {w}</p>
